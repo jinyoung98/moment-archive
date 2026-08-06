@@ -2,50 +2,44 @@
 
 > 세션이 바뀌어도 이어갈 수 있도록 유지하는 상태 파일.
 > **작업 단위가 끝날 때마다 갱신할 것.**
+>
+> **길이를 지킨다.** 이 파일은 매 세션 시작에 읽힌다. 세션 기록은 최근 2~3건만 남기고
+> 나머지는 지운다 — 무엇을 했는지는 `git log` 에 이미 있다.
+> 지우려는 항목에 ADR·코드 주석 어디에도 없는 판단이 들어 있다면, 그건 지울 게 아니라
+> **거기로 옮겨야 한다는 신호**다.
 
 - **최종 갱신**: 2026-08-06
-- **현재 단계**: W1 진행 중 — 하네스 완료(테스트 4건 통과), 수직 슬라이스 착수 전
+- **현재 단계**: W1 진행 중 — 하네스 완료, 수직 슬라이스 착수 전
 
 ---
 
 ## 지금 해야 할 일
 
-> **다음 세션의 첫 작업: 스토리지 계층.**
+> **다음 첫 작업: 스토리지 계층.**
 > `archive-backend/.../media/` 에 S3 추상화 → 해시 기반 키 → CAS 저장/조회.
 > `IntegrationTest` 에 MinIO 컨테이너를 추가해 `I1`·`I2` 를 진짜 형태로 검증한다.
 
-### 끝난 것 — W1 하네스
+### W1 수직 슬라이스
 
-컨테이너 위에서 실제로 돈다.
+목표는 **브라우저에서 사진 1장을 올리면 썸네일이 뜬다** ([roadmap.md](./roadmap.md) §2 W1).
 
-1. ~~`git init`~~ ✅
-2. ~~`docker-compose.yml` — PostgreSQL + MinIO~~ ✅ 서버에서 기동 확인
-3. ~~Gradle + Spring Boot 4 프로젝트 생성~~ ✅
-4. ~~Testcontainers 골격 + `Clock` 빈 주입~~ ✅
-5. ~~통과하는 통합 테스트 1개~~ ✅ **4건 통과, 23초**
-
-### 다음 — W1 수직 슬라이스
-
-목표는 여전히 **브라우저에서 사진 1장을 올리면 썸네일이 뜬다**([roadmap.md](./roadmap.md) §2 W1).
-
-- [ ] 스토리지 — S3 클라이언트 추상화, 해시 기반 키, CAS 저장/조회 (`I1`, `I2` 본 검증)
+- [x] 하네스 — Testcontainers + `Clock` 주입, 통합 테스트 4건 통과
+- [ ] 스토리지 — S3 클라이언트 추상화, 해시 기반 키, CAS 저장/조회 (`I1`·`I2` 본 검증)
 - [ ] 업로드 — 단일 파일 `PUT` (청크 없음)
 - [ ] 처리 — `PROBE`(EXIF) + `THUMB`(libvips), **동기 실행**
 - [ ] 인증 — 소셜 로그인 1종
-- [ ] 프론트 — `archive-frontend/` 에 React + Vite + TS 스캐폴딩, 파일 선택 + 결과 표시, 스타일 없음 (ADR A16)
+- [ ] 프론트 — `archive-frontend/` 스캐폴딩, 파일 선택 + 결과 표시, 스타일 없음 (ADR A16)
 
-### 실행 환경 (확정)
+### 실행 환경
 
-서버 `192.168.133.222`. Twingate 로 접속하고, Docker 데몬은 `tcp://192.168.133.222:2375`
-에서 사설 IP 로만 열려 있다. 로컬에 필요한 것:
+새 셸마다 필요하다. 없으면 `Could not find a valid Docker environment` 로 실패한다.
 
 ```bash
 export DOCKER_HOST=tcp://192.168.133.222:2375
 export TESTCONTAINERS_HOST_OVERRIDE=192.168.133.222
 ```
 
-상시 스택 Postgres 호스트 포트는 **5434** 다 (서버에 다른 Postgres 가 5432·5433 을 쓰는 중).
-상세는 [infra.md](./infra.md).
+상시 스택 Postgres 호스트 포트는 **5434**. 서버 셋업·제약은 [infra.md](./infra.md).
 
 ---
 
@@ -54,7 +48,7 @@ export TESTCONTAINERS_HOST_OVERRIDE=192.168.133.222
 | 단계 | 상태 | 완료 기준 |
 |---|---|---|
 | 설계 | ✅ 완료 | 데이터 모델·파이프라인·로드맵 문서화 |
-| W1 뼈대 | 🔶 진행 중 | 브라우저에서 사진 1장 → 썸네일 표시 (하네스는 완료) |
+| W1 뼈대 | 🔶 진행 중 | 브라우저에서 사진 1장 → 썸네일 표시 (하네스 완료) |
 | W2 업로드·파이프라인 | ⬜ 미착수 | 50장+영상 3개 업로드, 중단 후 재개 |
 | W3 기록·블록 | ⬜ 미착수 | 기록 하나를 처음부터 끝까지 작성 |
 | W4 하네스 | ⬜ 미착수 | `./gradlew verify` 하나로 전부 검증 |
@@ -121,41 +115,25 @@ export TESTCONTAINERS_HOST_OVERRIDE=192.168.133.222
 
 ## 세션 기록
 
-작업한 내용을 짧게 남긴다. 무엇을 왜 했는지가 다음 세션의 맥락이 된다.
+다음 세션이 맥락을 잡는 다리. 최근 것만 남긴다 (문서 머리의 규칙 참조).
 
 ### 2026-08-06 — 서버 셋업과 하네스 검증
-서버에서 상시 스택을 띄우고 원격 Docker 데몬을 열어, **통합 테스트 4건이 컨테이너 위에서 통과**하는 것을 확인했다. 23초.
+원격 Docker 데몬을 열고 **통합 테스트 4건이 컨테이너 위에서 통과**하는 것을 확인했다. 23초.
 
 - 서버 `192.168.133.222`, Twingate 경유. dockerd 는 사설 IP 에만 바인딩(`0.0.0.0` 아님)
-- systemd override 는 기존 `ExecStart` 를 읽어 뒤에 덧붙이는 방식으로 작성했다. 통째로 덮어쓰면 배포판이 넣어둔 `--containerd=…` 가 사라진다
-- 서버에 다른 Postgres 가 5432·5433 을 점유 중이라 호스트 포트를 **5434** 로. compose 를 고치는 대신 `.env` 변수로 뺐다 (`POSTGRES_PORT`, `MINIO_API_PORT`, `MINIO_CONSOLE_PORT`)
-- 이 충돌은 Testcontainers 와 무관하다. 매번 빈 포트를 스스로 고르기 때문
-- Ryuk 회수 정상 동작 확인 — 테스트 후 서버에 남는 컨테이너 없음
+- systemd override 는 기존 `ExecStart` 를 읽어 뒤에 덧붙였다. 통째로 덮어쓰면 배포판이 넣어둔 `--containerd=…` 가 사라진다
+- 서버에 다른 Postgres 가 5432·5433 을 점유해 호스트 포트를 **5434** 로. compose 를 고치는 대신 `.env` 변수로 뺐다. 이 충돌은 Testcontainers 와 무관하다 — 매번 빈 포트를 스스로 고르기 때문
+- Ryuk 회수 정상 — 테스트 후 서버에 남는 컨테이너 없음
+- 저장소를 `archive-backend/` + `archive-frontend/` 로 나누고 Gradle 멀티프로젝트로 전환
 
-**W1 하네스 완료.** 남은 것은 수직 슬라이스(스토리지 → 업로드 → PROBE/THUMB → 프론트).
+### 2026-08-06 — W1 착수
+실행 환경을 확정하고 프로젝트 뼈대를 세웠다. ADR A12~A16 추가.
 
-### 2026-08-06 — W1 착수 (검증 전)
-실행 환경을 확정하고 프로젝트 뼈대를 작성했다. **아직 빌드·테스트를 한 번도 돌리지 못했다.**
+- 로컬에 Docker 데몬이 없는 환경으로 확정 → [infra.md](./infra.md) 신설
+- 영속성 **Spring Data JDBC**(A12), 마이그레이션 **Flyway 순수 SQL**(A13), 원격 데몬 제약(A14)
+- **Spring Boot 4.1**(A15). 3.5가 2026-06-30 OSS EOL 이라 3.x 로 시작할 이유가 없었다
+- 프론트 **React + Vite + TS, TanStack Query**(A16)
 
-- 로컬에 Docker 데몬이 없는 환경으로 확정 → [infra.md](./infra.md) 신설. 상시 스택은 서버 compose, Testcontainers는 `DOCKER_HOST`로 원격 데몬. 접속은 **Twingate**
-- 문서에 없던 결정 2개를 확정하고 ADR A12·A13 추가 — 영속성은 **Spring Data JDBC**, 마이그레이션은 **Flyway 순수 SQL**. 원격 데몬 제약은 A14
-- **Spring Boot 4.1** 로 정정(A15). 3.5가 2026-06-30 OSS EOL 이라 3.x 로 시작할 이유가 없어졌다. 스타터 이름이 바뀐 것에 주의 — `-web` → `-webmvc`, Flyway 는 `spring-boot-starter-flyway` 필요
-- `build.gradle`, `V1__baseline.sql`(users·media_assets·media_derivatives), `ClockConfig`, `IntegrationTest` 기반 클래스, `HarnessIntegrationTest` 작성
-
-**빌드 통과까지 걸린 것들** — 버전을 올린 대가. 추정으로 적은 좌표가 대부분 틀렸다.
-
-| 추정 | 실제 |
-|---|---|
-| `spring-boot-starter-web` | `spring-boot-starter-webmvc` |
-| `flyway-core` 직접 선언 | `spring-boot-starter-flyway` 필요 |
-| `spring-boot-starter-test` 하나 | 기술별로 분리 — `-webmvc-test`, `-data-jdbc-test`, `-flyway-test` |
-| Boot BOM 이 Testcontainers 관리 | 관리 안 함. 버전 직접 지정 |
-| `org.testcontainers:postgresql` | `org.testcontainers:testcontainers-postgresql` (2.x 부터 접두사). 옛 좌표는 1.21.4 에서 멈춤 |
-| `org.testcontainers.containers.PostgreSQLContainer` | `org.testcontainers.postgresql.PostgreSQLContainer` (구 좌표는 deprecated, 제네릭 파라미터 없어짐) |
-
-`-Xlint:deprecation`·`-Xlint:unchecked` 를 빌드에 상시 켰다. 방금처럼 조용한 deprecated 사용을 놓치지 않기 위해서다.
-
-### 2026-08-06 — 설계
-주제 선정부터 전체 설계까지. 데이터 모델 확정, 업로드·처리 파이프라인 설계, 5주 로드맵과 불변식 명세 작성.
-
-설계 과정에서 제거된 것: 그룹 관련 테이블 3개(촬영본 대부분을 사용하므로 "추려내기" 불필요), `scene_overrides`(장면 분할이 1회성 계산이라 override 보존 불필요), `PHOTO`/`VIDEO` 블록 타입(`GALLERY`로 통합), `quality_score` 컬럼.
+> 버전을 올리면서 스타터·아티팩트 좌표를 여섯 군데 틀렸다. 고친 내용은 `build.gradle` 과
+> `IntegrationTest.java` 주석에 그때그때 남겨뒀으니 다음 업그레이드 때 거기를 볼 것.
+> `-Xlint:deprecation`·`-Xlint:unchecked` 를 상시 켠 것도 같은 이유다.
