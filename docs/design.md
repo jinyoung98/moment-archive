@@ -3,7 +3,7 @@
 > 사진을 중심으로 하루의 기억을 기록하고, 시간이 지나도 그날의 흐름을 다시 떠올릴 수 있게 돕는 개인 기록 서비스.
 
 - **작성 시점**: 2026-08-05
-- **스택**: Java 21 / Spring Boot 3 / PostgreSQL / MinIO(S3 호환) / libvips / FFmpeg
+- **스택**: Java 21 / Spring Boot 4 / PostgreSQL / MinIO(S3 호환) / libvips / FFmpeg
 - **클라이언트**: 웹앱 (모바일 브라우저 우선)
 
 ### 문서 구성
@@ -906,6 +906,10 @@ com.<domain>.archive
 | A9 | `GALLERY` 단일 타입으로 통합 | 레이아웃 전환이 payload 1필드 수정 | PHOTO/GALLERY 분리 — 전환 시 블록 분해·재구성 필요 |
 | A10 | 장면 override 테이블 미도입 | 분할은 1회성 계산, 이후 조정은 일반 블록 편집 | override 테이블 — 재계산이 없으므로 존재 이유 없음 |
 | A11 | AI를 잎사귀로 격리 | 확률적으로 실패하는 외부 의존성을 핵심 경로에서 제외 | 핵심 경로 통합 — 장애 시 서비스 전체 중단 |
+| A12 | 영속성을 Spring Data JDBC로 | 지연로딩·더티체킹이 없어 발생 SQL이 예측 가능. 불변식 테스트와 에이전트 루프의 전제인 결정론에 직결 | JPA — 큐·순서키는 결국 native query, 영속성 컨텍스트가 멱등성 테스트를 가림 |
+| A13 | 스키마를 Flyway 순수 SQL로 | design.md의 DDL을 번역 없이 옮겨 문서와 코드의 표류를 막음 | Liquibase — 단일 DB에서 추상화 이점 없음 / `ddl-auto` — 스키마가 버전 관리되지 않음 |
+| A14 | Docker 데몬을 원격 서버에 둠 | 개발 노트북에 Docker를 두지 않는 환경 제약 | 로컬 데몬 — 선택지가 아니었음. 대가는 바인드 마운트 불가와 테스트 지연 ([infra.md](./infra.md) §5) |
+| A15 | Spring Boot 4 로 시작 | Boot 3.x는 2026-06-30 자로 전 브랜치 OSS 지원 종료. 신규 프로젝트라 3→4 마이그레이션 비용(breaking change 115건)이 발생하지 않음 | Boot 3.5 — 예제·레퍼런스는 많지만 보안 패치가 끊긴 상태로 시작하게 됨 |
 
 ---
 

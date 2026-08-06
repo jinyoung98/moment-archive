@@ -1,0 +1,60 @@
+plugins {
+    id 'java'
+    // Boot 3.x 는 2026-06-30 자로 전 브랜치 OSS 지원 종료. ADR A15 참조.
+    id 'org.springframework.boot' version '4.1.0'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'dev.jinyoung'
+version = '0.0.1-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Boot 4 에서 spring-boot-starter-web 은 spring-boot-starter-webmvc 로 대체되었다.
+    implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+    // JPA가 아니라 Data JDBC. 이유는 design.md ADR A12 참조.
+    implementation 'org.springframework.boot:spring-boot-starter-data-jdbc'
+    // Boot 4 부터 Flyway 는 전용 스타터를 거친다. flyway-core 직접 선언으로는 자동설정이 붙지 않는다.
+    implementation 'org.springframework.boot:spring-boot-starter-flyway'
+    implementation 'org.flywaydb:flyway-database-postgresql'
+    runtimeOnly 'org.postgresql:postgresql'
+
+    // Boot 4 는 테스트 스타터도 기술별로 쪼개졌다. 예전의 spring-boot-starter-test 하나가 아니다.
+    testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-data-jdbc-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-flyway-test'
+
+    // 컨테이너 위에서 도는 통합 테스트. 데몬은 원격이다 — docs/infra.md 참조.
+    // Boot 4 BOM 은 Testcontainers 버전을 관리하지 않으므로 BOM 을 직접 가져온다.
+    // 2.x 부터 모듈 아티팩트에 testcontainers- 접두사가 붙었다.
+    // 접두사 없는 옛 좌표(org.testcontainers:postgresql)는 1.21.4 에서 멈춰 있으니 헷갈리지 말 것.
+    testImplementation 'org.testcontainers:testcontainers-postgresql:2.0.5'
+    testImplementation 'org.testcontainers:testcontainers-minio:2.0.5'
+    // Thread.sleep 금지의 대체제. CLAUDE.md 코딩 규칙 참조.
+    testImplementation 'org.awaitility:awaitility'
+
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    // deprecated API 를 조용히 넘기지 않는다. Boot 4 / Testcontainers 2 로 올린 직후라
+    // 사라질 API 를 쓰고 있는지 즉시 보이는 편이 낫다.
+    options.compilerArgs << '-Xlint:deprecation' << '-Xlint:unchecked'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    testLogging {
+        events 'passed', 'skipped', 'failed'
+        exceptionFormat 'full'
+    }
+}

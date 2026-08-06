@@ -12,13 +12,22 @@
 
 **W1 시작 — 프로젝트 스캐폴딩**
 
-1. `git init` (에이전트 루프 가드가 git에 의존하므로 필수)
-2. Gradle + Spring Boot 3 프로젝트 생성
-3. `docker-compose.yml` — PostgreSQL + MinIO
-4. **Testcontainers 골격 + `Clock` 빈 주입** ← 이것부터
-5. 통과하는 통합 테스트 1개 (컨테이너 위에서)
+1. ~~`git init`~~ ✅
+2. ~~`docker-compose.yml` — PostgreSQL + MinIO~~ ✅ 작성 완료. **서버에서 실행 대기 중**
+3. ~~Gradle + Spring Boot 4 프로젝트 생성~~ ✅ `./gradlew compileTestJava` 통과 (경고 0)
+4. ~~Testcontainers 골격 + `Clock` 빈 주입~~ ✅ 작성 완료. **실행 검증 대기 중**
+5. 통과하는 통합 테스트 1개 (컨테이너 위에서) ← **서버 셋업이 있어야 진행 가능**
 
 상세는 [roadmap.md](./roadmap.md) §2 W1 참조.
+
+> ⏸ **막힌 지점**: `./gradlew test` 가 `Could not find a valid Docker environment` 에서 멈춘다.
+> 코드·빌드 문제가 아니라 Docker 데몬이 아직 없기 때문이다. 컴파일은 경고 없이 통과한다.
+>
+> **사람이 해야 할 일** — [infra.md](./infra.md) §6 체크리스트.
+> 서버에서 compose 기동, Twingate Resource 등록(포트 제한 없이), dockerd 사설 IP 바인딩.
+> 그다음 로컬에 `DOCKER_HOST` 와 `TESTCONTAINERS_HOST_OVERRIDE` 를 설정한다.
+>
+> 그때까지 "테스트가 통과함"은 주장하지 않는다.
 
 ---
 
@@ -91,6 +100,29 @@
 ## 세션 기록
 
 작업한 내용을 짧게 남긴다. 무엇을 왜 했는지가 다음 세션의 맥락이 된다.
+
+### 2026-08-06 — W1 착수 (검증 전)
+실행 환경을 확정하고 프로젝트 뼈대를 작성했다. **아직 빌드·테스트를 한 번도 돌리지 못했다.**
+
+- 로컬에 Docker 데몬이 없는 환경으로 확정 → [infra.md](./infra.md) 신설. 상시 스택은 서버 compose, Testcontainers는 `DOCKER_HOST`로 원격 데몬. 접속은 **Twingate**
+- 문서에 없던 결정 2개를 확정하고 ADR A12·A13 추가 — 영속성은 **Spring Data JDBC**, 마이그레이션은 **Flyway 순수 SQL**. 원격 데몬 제약은 A14
+- **Spring Boot 4.1** 로 정정(A15). 3.5가 2026-06-30 OSS EOL 이라 3.x 로 시작할 이유가 없어졌다. 스타터 이름이 바뀐 것에 주의 — `-web` → `-webmvc`, Flyway 는 `spring-boot-starter-flyway` 필요
+- `build.gradle`, `V1__baseline.sql`(users·media_assets·media_derivatives), `ClockConfig`, `IntegrationTest` 기반 클래스, `HarnessIntegrationTest` 작성
+
+**빌드 통과까지 걸린 것들** — 버전을 올린 대가. 추정으로 적은 좌표가 대부분 틀렸다.
+
+| 추정 | 실제 |
+|---|---|
+| `spring-boot-starter-web` | `spring-boot-starter-webmvc` |
+| `flyway-core` 직접 선언 | `spring-boot-starter-flyway` 필요 |
+| `spring-boot-starter-test` 하나 | 기술별로 분리 — `-webmvc-test`, `-data-jdbc-test`, `-flyway-test` |
+| Boot BOM 이 Testcontainers 관리 | 관리 안 함. 버전 직접 지정 |
+| `org.testcontainers:postgresql` | `org.testcontainers:testcontainers-postgresql` (2.x 부터 접두사). 옛 좌표는 1.21.4 에서 멈춤 |
+| `org.testcontainers.containers.PostgreSQLContainer` | `org.testcontainers.postgresql.PostgreSQLContainer` (구 좌표는 deprecated, 제네릭 파라미터 없어짐) |
+
+`-Xlint:deprecation`·`-Xlint:unchecked` 를 빌드에 상시 켰다. 방금처럼 조용한 deprecated 사용을 놓치지 않기 위해서다.
+
+**남은 것**: `./gradlew test` 는 Docker 데몬이 없어 실패한다. 서버 셋업 후 재검증.
 
 ### 2026-08-06 — 설계
 주제 선정부터 전체 설계까지. 데이터 모델 확정, 업로드·처리 파이프라인 설계, 5주 로드맵과 불변식 명세 작성.

@@ -18,6 +18,7 @@
 | [docs/design.md](docs/design.md) | 정체성, 설계 원칙, 전체 DDL, 삭제 정책, MVP 범위, ADR | 도메인/스키마 작업 전 |
 | [docs/pipeline.md](docs/pipeline.md) | 업로드 프로토콜, 워커 상태 머신, 재시도, SSE, 실패 시나리오 | 업로드/처리 작업 전 |
 | [docs/roadmap.md](docs/roadmap.md) | 주차별 계획, 잘라낼 순서, 불변식 명세, 에이전트 루프 | 무엇을 할지 정할 때 |
+| [docs/infra.md](docs/infra.md) | 실행 환경, 서버 스택, 원격 Docker 데몬, 그 제약 | 컨테이너·테스트 환경 작업 전 |
 | [docs/progress.md](docs/progress.md) | **현재 진행 상황** | 세션 시작 시 항상 |
 | [docs/interview-notes.md](docs/interview-notes.md) | 기술 판단의 면접용 정리 | 새 판단이 나올 때마다 갱신 |
 
@@ -31,11 +32,21 @@
 
 ## 스택
 
-Java 21 / Spring Boot 3 / PostgreSQL / MinIO(S3 호환) / libvips / FFmpeg
+Java 21 / Spring Boot 4 / PostgreSQL / MinIO(S3 호환) / libvips / FFmpeg
+영속성은 Spring Data JDBC(JPA 아님), 스키마는 Flyway 순수 SQL. 이유는 ADR A12·A13·A15
 클라이언트: 웹앱 (모바일 브라우저 우선)
 
 **의도적으로 쓰지 않는 것**: Kafka, RabbitMQ, Redis. 이유는 design.md §3.1과 ADR A1 참조.
 다시 쓰자는 제안을 하려면 문서에 적힌 도입 조건이 충족되었는지 먼저 확인할 것.
+
+## 실행 환경
+
+**로컬에 Docker 데몬이 없다.** 모든 컨테이너는 원격 서버에서 돈다.
+
+- `docker`, `docker compose`, `colima` 명령을 **로컬에서 실행하지 않는다.** 필요하면 명령과 파일만 제시하고 사람이 서버에서 실행한다
+- Postgres·MinIO 상시 스택은 서버의 `docker compose`. 로컬에서 띄우려 하지 말 것
+- Testcontainers는 `DOCKER_HOST`로 서버 데몬을 원격 조작한다. 따라서 **바인드 마운트를 쓸 수 없다** — `withCopyFileToContainer`를 쓴다
+- 상세와 나머지 제약은 [docs/infra.md](docs/infra.md)
 
 ## 코딩 규칙
 
@@ -48,6 +59,7 @@ Java 21 / Spring Boot 3 / PostgreSQL / MinIO(S3 호환) / libvips / FFmpeg
 ## Git
 
 - 작업 브랜치는 **`dev`**
+- **커밋 메시지에 `Co-Authored-By: Claude ...` 트레일러를 넣지 않는다.** 도구 기본 동작이 이 줄을 자동으로 붙이더라도 붙이지 않는다. 이 규칙이 그 기본값보다 우선한다. 다른 AI 관련 트레일러(`Generated with ...` 등)도 마찬가지
 - **골든셋의 실제 사진·영상 파일은 절대 커밋하지 않는다.** 공개 저장소에 지인 얼굴이 담긴 사진이 올라간다. 해시와 기대값(`golden/manifest.json`)만 커밋한다. roadmap.md §5 참조
 
 ## 작업 규칙

@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: archive
+
+  datasource:
+    # 로컬 실행 시에는 서버의 Postgres 를 바라본다. docs/infra.md §3 참조.
+    # 실제 접속 정보는 application-local.yml 에 두고 커밋하지 않는다.
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/archive}
+    username: ${DB_USER:archive}
+    password: ${DB_PASSWORD:}
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # 빈 DB 가 아닐 때 조용히 넘어가지 않게 한다. 스키마 표류를 즉시 드러내는 편이 낫다.
+    baseline-on-migrate: false
+
+  servlet:
+    multipart:
+      # W1 은 단일 파일 PUT. 청크 프로토콜은 W2 에서 들어온다 (pipeline.md).
+      max-file-size: 512MB
+      max-request-size: 512MB
+
+server:
+  port: 8080

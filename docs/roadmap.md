@@ -41,7 +41,7 @@
 
 | 영역 | 할 일 |
 |---|---|
-| 셋업 | Gradle, Spring Boot 3, Docker Compose (Postgres + MinIO) |
+| 셋업 | Gradle, Spring Boot 4, Docker Compose (Postgres + MinIO) — **서버에서 실행**. [infra.md](./infra.md) |
 | **하네스** | **Testcontainers 골격, `Clock` 주입, 통합 테스트 1개** |
 | 스토리지 | S3 클라이언트 추상화, 해시 기반 키, CAS 저장/조회 |
 | 도메인 | `users`, `media_assets`, `media_derivatives` |
