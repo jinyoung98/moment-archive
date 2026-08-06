@@ -1,1 +1,6 @@
 rootProject.name = 'archive'
+
+// 백엔드와 프론트엔드를 한 저장소에 두되 디렉토리로 나눈다 (design.md §10).
+// Gradle wrapper 는 루트에 남긴다 — W4 의 완료 기준이 "./gradlew verify 하나로 전부 검증"
+// 이므로 진입점이 저장소 루트에 있어야 한다 (roadmap.md §2 W4).
+include 'archive-backend'

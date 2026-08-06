@@ -31,7 +31,7 @@ dist/
 .env.local
 application-local.yml
 application-local.yaml
-src/main/resources/application-local.*
+**/src/main/resources/application-local.*
 
 # --- 로컬 데이터 ---
 .minio-data/

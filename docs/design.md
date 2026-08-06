@@ -872,8 +872,27 @@ SELECT * FROM media_assets
 
 ## 10. 패키지 구조
 
+백엔드와 프론트엔드를 한 저장소에 두되 최상위 디렉토리로 나눈다. 개인 프로젝트라
+저장소를 쪼갤 이유가 없고, API 변경과 클라이언트 변경이 한 커밋에 묶이는 편이 낫다.
+
 ```
-com.<domain>.archive
+archive/
+├── archive-backend/     # Spring Boot
+├── archive-frontend/    # React + Vite
+├── docs/
+├── golden/              # 골든셋 (media/ 는 커밋 안 함)
+├── docker-compose.yml   # 서버에서 실행하는 상시 스택
+├── settings.gradle      # include 'archive-backend'
+└── gradlew              # 진입점은 루트에 둔다 (W4: ./gradlew verify 하나로 전부)
+```
+
+Gradle wrapper 를 `archive-backend/` 안이 아니라 루트에 두는 이유는 roadmap.md §2 W4 의
+완료 기준 때문이다. 검증 진입점이 저장소 루트에 하나 있어야 한다.
+
+### 백엔드 패키지
+
+```
+dev.jinyoung.archive
 ├── auth           # 소셜 로그인, 세션
 ├── media          # 자산, 해시, 스토리지 추상화
 ├── upload         # 세션, 청크, 재개, 중복 감지
@@ -889,11 +908,10 @@ com.<domain>.archive
 └── common         # 스토리지 클라이언트, Clock, 해시 유틸
 ```
 
-프론트엔드는 같은 저장소 안에 둔다. 개인 프로젝트라 저장소를 나눌 이유가 없고,
-API 변경과 클라이언트 변경이 한 커밋에 묶이는 편이 낫다.
+### 프론트엔드
 
 ```
-web/
+archive-frontend/
 ├── src/
 │   ├── api/       # 서버 호출, SSE 구독, 폴링 폴백
 │   ├── upload/    # Web Worker 해싱, 청크 전송, 재개
