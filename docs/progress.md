@@ -95,6 +95,9 @@ export TESTCONTAINERS_HOST_OVERRIDE=192.168.133.222
 
 실측이 필요해 아직 정하지 못한 것들. 구현하며 채운다.
 
+- [ ] **프론트 검증을 `./gradlew verify` 에 묶을 것인가** (W4에서 결정, [design.md](./design.md) §10)
+      — node-gradle 플러그인 / `Exec` 태스크 / 루트 `verify` 스크립트 셋 중 하나.
+      프론트에 어떤 검증이 실제로 생기는지 본 뒤에 정한다
 - [ ] 청크 크기 (5MB가 모바일 네트워크에서 적절한가)
 - [ ] 동시 업로드 개수 (3개 가정)
 - [ ] 해싱 Worker 개수 (2개 가정)

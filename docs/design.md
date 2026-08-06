@@ -886,8 +886,21 @@ archive/
 └── gradlew              # 진입점은 루트에 둔다 (W4: ./gradlew verify 하나로 전부)
 ```
 
-Gradle wrapper 를 `archive-backend/` 안이 아니라 루트에 두는 이유는 roadmap.md §2 W4 의
-완료 기준 때문이다. 검증 진입점이 저장소 루트에 하나 있어야 한다.
+Gradle wrapper 를 `archive-backend/` 안이 아니라 루트에 둔다. 단일 모듈 멀티프로젝트의
+관례이고, 루트에서 `./gradlew :archive-backend:test` 로 바로 실행된다.
+
+> **W4 의 "`./gradlew verify` 하나로 전부 검증"이 프론트까지 포함하는지는 아직 미정이다.**
+> Gradle 은 JVM 빌드 도구라 프론트를 자동으로 검증하지 못한다. 배선이 필요하고, 선택지는 셋이다.
+>
+> | 방법 | 장점 | 걸리는 점 |
+> |---|---|---|
+> | `com.github.node-gradle.node` 플러그인 | Gradle 이 Node 를 직접 관리해 재현성이 높다 | 최신이 7.1.0(2024-09). Gradle 9 지원 명시 없음 |
+> | 순수 `Exec` 태스크로 npm 호출 | 플러그인 의존 0 | Node 가 머신에 있어야 하고 버전 고정은 별도 수단 |
+> | Gradle 대신 루트 `verify` 스크립트 | 가장 단순. 두 도구를 대등하게 다룸 | Gradle 태스크 그래프의 캐싱·증분 이점을 못 씀 |
+>
+> **W4 에서 정한다.** 프론트에 어떤 검증(vitest, `tsc --noEmit`, eslint, e2e)이 실제로
+> 생길지 모르는 상태에서 미리 고르면 안 쓰는 배선을 만들게 된다. wrapper 위치는 어느
+> 쪽을 택해도 손해가 없으므로 지금 결정할 필요가 없다.
 
 ### 백엔드 패키지
 
