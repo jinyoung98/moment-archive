@@ -27,28 +27,118 @@
 
 ## 2. 서버 준비 — 상시 스택
 
-서버에서 한 번만 한다.
+전제: Ubuntu/Debian 계열, Docker 설치됨, SSH 접속 가능.
+
+> **먼저 이 단계만 끝낸다.** 네트워크 노출(§3)은 그다음이다.
+> 둘을 한 번에 하면 문제가 생겼을 때 "컨테이너가 안 뜬 것"인지 "네트워크가 안 뚫린 것"인지
+> 구분이 안 된다. 서버 안에서 도는 것부터 확인하고 넘어간다.
+
+### 2.1 파일 옮기기
+
+**저장소를 통째로 clone 하지 않는다.** 서버에 필요한 것은 `docker-compose.yml` 과 `.env.example`
+두 개뿐이고, 이 저장소에는 아직 원격이 없다.
+
+노트북에서:
 
 ```bash
-git clone <repo> && cd new
-cp .env.example .env
+ssh <user>@<서버> 'mkdir -p ~/archive'
+scp docker-compose.yml .env.example <user>@<서버>:~/archive/
 ```
 
-`.env`의 빈 값을 채운다 (`POSTGRES_PASSWORD`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`).
+### 2.2 Docker 권한 확인
+
+서버에 접속해서:
+
+```bash
+ssh <user>@<서버>
+docker ps
+```
+
+`permission denied` 가 나오면 현재 계정이 docker 그룹에 없는 것이다. 매번 `sudo` 를 붙이는
+대신 그룹에 넣는다.
+
+```bash
+sudo usermod -aG docker $USER
+```
+
+**적용되려면 다시 로그인해야 한다.** `exit` 후 재접속하고 `docker ps` 를 다시 확인한다.
+
+### 2.3 비밀번호 만들고 `.env` 채우기
+
+```bash
+cd ~/archive
+cp .env.example .env
+openssl rand -hex 24       # 두 번 실행해 Postgres·MinIO 용으로 각각 하나씩
+```
+
+> `-base64` 가 아니라 `-hex` 를 쓴다. base64 는 `+` `/` `=` 를 섞어 내는데,
+> `.env` 파싱과 셸 인용에서 사고가 나기 쉽다. hex 는 영숫자뿐이라 그런 일이 없다.
+
+`nano .env` 로 열어 세 값을 채운다. 나머지 기본값은 그대로 둔다.
+
+| 키 | 값 |
+|---|---|
+| `POSTGRES_PASSWORD` | 생성한 문자열 |
+| `MINIO_ROOT_USER` | 예: `archive-admin` (8자 이상) |
+| `MINIO_ROOT_PASSWORD` | 생성한 문자열 |
+
+`.env` 는 서버에만 두고 저장소에 넣지 않는다. `.gitignore` 에 등록되어 있다.
+
+**포트가 겹칠 때**는 compose 파일을 고치지 말고 `.env` 의 `POSTGRES_PORT`·`MINIO_API_PORT`·
+`MINIO_CONSOLE_PORT` 를 바꾼다. 컨테이너 내부 포트는 항상 그대로이므로 호스트 쪽만 비켜주면 된다.
+이 서버는 이미 다른 Postgres 가 5432·5433 을 쓰고 있어 **`POSTGRES_PORT=5434`** 를 기본값으로 둔다.
+
+### 2.4 기동
 
 ```bash
 docker compose up -d
 ```
 
-확인:
+처음에는 이미지를 받느라 몇 분 걸린다.
+
+### 2.5 확인
 
 ```bash
-docker compose ps && docker compose logs minio-init
+docker compose ps
 ```
 
-`minio-init`이 `bucket ready: archive`를 출력하고 종료하면 정상이다. 이 컨테이너는 멱등하므로 `up`을 다시 해도 안전하다.
+`postgres` 와 `minio` 가 `running (healthy)` 여야 한다. `minio-init` 은 목록에 없거나
+`exited (0)` 인데, **이게 정상이다** — 버킷을 만들고 스스로 끝나는 일회성 컨테이너다.
 
-버킷은 **하나**(`archive`)이고 원본·파생물은 접두사로 나눈다 — `originals/ab/cd/…`, `derivatives/…`. [design.md](./design.md) §5.3의 `storage_key` 예시와 같은 구조다.
+```bash
+docker compose logs minio-init
+```
+
+`bucket ready: archive` 가 보이면 성공이다. 멱등하므로 `up` 을 다시 해도 안전하다.
+
+DB 가 실제로 응답하는지도 본다.
+
+```bash
+docker compose exec postgres psql -U archive -d archive -c '\dt'
+```
+
+`Did not find any relations.` 가 나오면 정상이다. 테이블은 애플리케이션이 Flyway 로 만든다.
+
+여기까지 되면 상시 스택은 완성이다. 버킷은 **하나**(`archive`)이고 원본·파생물은 접두사로
+나눈다 — `originals/ab/cd/…`, `derivatives/…`. [design.md](./design.md) §5.3 의
+`storage_key` 예시와 같은 구조다.
+
+### 2.6 막혔을 때
+
+| 증상 | 원인과 조치 |
+|---|---|
+| `permission denied ... docker.sock` | §2.2 의 그룹 추가 후 **재로그인**하지 않았다 |
+| `port is already allocated` | 해당 포트를 다른 컨테이너·프로세스가 쓰고 있다. `sudo ss -lptn 'sport = :5434'` 로 확인하고 `.env` 의 `POSTGRES_PORT` 를 비어 있는 값으로 바꾼다 |
+| `POSTGRES_PASSWORD ... is required` | `.env` 를 안 만들었거나 값이 비어 있다. `docker compose config` 로 치환 결과를 확인 |
+| `minio` 가 `unhealthy` | `docker compose logs minio`. 대개 `MINIO_ROOT_PASSWORD` 가 8자 미만 |
+| `minio-init` 이 실패 | `docker compose logs minio-init`. 자격 오타가 대부분. 고친 뒤 `docker compose up -d minio-init` 으로 재실행 |
+
+멈추고 다시 시작하려면:
+
+```bash
+docker compose down          # 컨테이너만 내림. 데이터는 볼륨에 남는다
+docker compose down -v       # 볼륨까지 삭제 — DB 와 업로드가 전부 사라진다. 주의
+```
 
 ---
 
@@ -65,7 +155,7 @@ Twingate는 Resource에 포트를 지정하지 않으면 기본이 전체 허용
 | 포트 | 용도 |
 |---|---|
 | `2375` | Docker 데몬 API |
-| `5432` | Postgres (상시 스택) |
+| `5434` | Postgres (상시 스택). `.env` 의 `POSTGRES_PORT` 값 |
 | `9000`, `9001` | MinIO API·콘솔 |
 | `32768-60999` | **Testcontainers 가 매번 새로 여는 포트** |
 
@@ -74,16 +164,24 @@ Twingate는 Resource에 포트를 지정하지 않으면 기본이 전체 허용
 **서버에서** Docker 데몬을 사설 IP 에만 바인딩한다:
 
 ```bash
+IP=10.10.0.5                                          # 실제 서버 사설 IP 로 바꾼다
+ORIG=$(systemctl cat docker | grep -m1 '^ExecStart=')
 sudo mkdir -p /etc/systemd/system/docker.service.d
-sudo tee /etc/systemd/system/docker.service.d/override.conf <<'EOF'
-[Service]
-ExecStart=
-ExecStart=/usr/bin/dockerd -H fd:// -H tcp://10.10.0.5:2375
-EOF
+printf '[Service]\nExecStart=\n%s -H tcp://%s:2375\n' "$ORIG" "$IP" \
+  | sudo tee /etc/systemd/system/docker.service.d/override.conf
 sudo systemctl daemon-reload && sudo systemctl restart docker
 ```
 
-`10.10.0.5` 를 실제 서버 사설 IP 로 바꾼다.
+> ⚠️ **원래 `ExecStart` 를 읽어서 뒤에 덧붙이는 것이 핵심이다.**
+> `/usr/bin/dockerd -H fd://` 로 통째로 덮어쓰면 배포판이 넣어둔 `--containerd=…` 같은
+> 플래그가 사라져 데몬이 뜨지 않거나 이상하게 동작한다. systemd 에서 `ExecStart=` 빈 줄은
+> "기존 값을 지운다"는 뜻이고, 그다음 줄이 새 값이 된다.
+
+확인:
+
+```bash
+sudo ss -lptn | grep 2375
+```
 
 > 🔴 **`tcp://0.0.0.0:2375` 로 열지 말 것.** 인증 없는 Docker 데몬 포트는 서버 루트 권한과 같다. 스캐너가 몇 시간 안에 찾아낸다. 반드시 사설 IP 에만 바인딩한다.
 
@@ -92,7 +190,7 @@ sudo systemctl daemon-reload && sudo systemctl restart docker
 ```yaml
 # docker-compose.yml — Twingate 사용 시
 ports:
-  - "10.10.0.5:5432:5432"
+  - "10.10.0.5:${POSTGRES_PORT:-5432}:5432"
 ```
 
 ### 3.2 대안: SSH 터널
@@ -106,7 +204,7 @@ ssh -N -L 12375:/var/run/docker.sock <user>@<server>
 상시 스택도 같이:
 
 ```bash
-ssh -N -L 12375:/var/run/docker.sock -L 5432:localhost:5432 -L 9000:localhost:9000 <user>@<server>
+ssh -N -L 12375:/var/run/docker.sock -L 5434:localhost:5434 -L 9000:localhost:9000 <user>@<server>
 ```
 
 이 방식은 **상시 스택에는 충분하지만 Testcontainers에는 부족하다.** 터널은 미리 정한 포트만 넘기는데, Testcontainers가 여는 포트는 실행할 때마다 달라지기 때문이다. Testcontainers까지 쓰려면 서버 방화벽에서 노트북 IP에 한해 임시 포트 범위를 열어야 한다.
@@ -138,7 +236,10 @@ export TESTCONTAINERS_HOST_OVERRIDE=10.10.0.5
 | `DOCKER_HOST` | **컨테이너를 만들 곳.** Testcontainers가 데몬 API를 호출하는 주소 |
 | `TESTCONTAINERS_HOST_OVERRIDE` | **컨테이너에 접속할 곳.** 매핑된 포트로 JDBC·S3 연결을 걸 주소 |
 
-`TESTCONTAINERS_HOST_OVERRIDE`가 없으면 Testcontainers는 컨테이너가 `localhost`에 있다고 가정하고, JDBC 연결이 노트북의 5432를 두드리다 실패한다.
+`TESTCONTAINERS_HOST_OVERRIDE`가 없으면 Testcontainers는 컨테이너가 `localhost`에 있다고 가정한다. 그러면 컨테이너는 서버에 떠 있는데 JDBC 연결은 노트북의 매핑 포트를 두드리다 실패한다.
+
+> 참고: 상시 스택의 포트 충돌(§2.3)은 **Testcontainers 와 무관하다.** Testcontainers 는 매번
+> 비어 있는 포트를 스스로 골라 매핑하므로 고정 포트를 쓰지 않는다.
 
 연결 확인:
 
@@ -184,7 +285,7 @@ docker compose images --format json
 
 서버 쪽 (사람이 실행):
 
-- [ ] `.env` 작성, `docker compose up -d`, `minio-init` 정상 종료 확인
+- [ ] **§2 전체** — 파일 복사, docker 그룹, `.env` 작성, `up -d`, `minio-init` 정상 종료 확인
 - [ ] Twingate 콘솔에 서버 사설 IP 를 Resource 로 등록 (**포트 제한 없이**)
 - [ ] dockerd 를 사설 IP 에 바인딩, `systemctl restart docker`
 - [ ] compose 포트 바인딩을 사설 IP 로 변경 후 재기동

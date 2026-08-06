@@ -5,7 +5,8 @@ spring:
   datasource:
     # 로컬 실행 시에는 서버의 Postgres 를 바라본다. docs/infra.md §3 참조.
     # 실제 접속 정보는 application-local.yml 에 두고 커밋하지 않는다.
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/archive}
+    # 포트는 서버의 .env 에 있는 POSTGRES_PORT 와 맞춰야 한다 (기존 Postgres 충돌로 5434 사용).
+    url: ${DB_URL:jdbc:postgresql://localhost:5434/archive}
     username: ${DB_USER:archive}
     password: ${DB_PASSWORD:}
 

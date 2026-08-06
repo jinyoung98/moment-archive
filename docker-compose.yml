@@ -19,7 +19,8 @@ services:
       PGTZ: UTC
     ports:
       # 127.0.0.1 바인딩. 외부 노출은 Twingate 사설 IP 또는 SSH 터널로만 (docs/infra.md §3).
-      - "127.0.0.1:5432:5432"
+      # 호스트 포트는 .env 에서 조정한다. 컨테이너 내부는 항상 5432 다.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -37,8 +38,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
     ports:
-      - "127.0.0.1:9000:9000" # S3 API
-      - "127.0.0.1:9001:9001" # 웹 콘솔
+      - "127.0.0.1:${MINIO_API_PORT:-9000}:9000"     # S3 API
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001" # 웹 콘솔
     volumes:
       - miniodata:/data
     healthcheck:
