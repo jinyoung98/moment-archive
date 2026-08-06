@@ -34,7 +34,7 @@
 
 Java 21 / Spring Boot 4 / PostgreSQL / MinIO(S3 호환) / libvips / FFmpeg
 영속성은 Spring Data JDBC(JPA 아님), 스키마는 Flyway 순수 SQL. 이유는 ADR A12·A13·A15
-클라이언트: 웹앱 (모바일 브라우저 우선)
+클라이언트: React + TypeScript + Vite (모바일 브라우저 우선). 서버 상태는 TanStack Query. 같은 저장소 `web/`
 
 **의도적으로 쓰지 않는 것**: Kafka, RabbitMQ, Redis. 이유는 design.md §3.1과 ADR A1 참조.
 다시 쓰자는 제안을 하려면 문서에 적힌 도입 조건이 충족되었는지 먼저 확인할 것.

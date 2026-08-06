@@ -4,7 +4,7 @@
 
 - **작성 시점**: 2026-08-05
 - **스택**: Java 21 / Spring Boot 4 / PostgreSQL / MinIO(S3 호환) / libvips / FFmpeg
-- **클라이언트**: 웹앱 (모바일 브라우저 우선)
+- **클라이언트**: React + TypeScript + Vite 웹앱 (모바일 브라우저 우선). 서버 상태는 TanStack Query
 
 ### 문서 구성
 
@@ -889,6 +889,19 @@ com.<domain>.archive
 └── common         # 스토리지 클라이언트, Clock, 해시 유틸
 ```
 
+프론트엔드는 같은 저장소 안에 둔다. 개인 프로젝트라 저장소를 나눌 이유가 없고,
+API 변경과 클라이언트 변경이 한 커밋에 묶이는 편이 낫다.
+
+```
+web/
+├── src/
+│   ├── api/       # 서버 호출, SSE 구독, 폴링 폴백
+│   ├── upload/    # Web Worker 해싱, 청크 전송, 재개
+│   ├── record/    # 블록 에디터
+│   └── ui/        # 화면 조각
+└── vite.config.ts # 개발 중에는 /api 를 :8080 으로 프록시
+```
+
 ---
 
 ## 11. 결정 기록 (ADR 초안)
@@ -910,6 +923,7 @@ com.<domain>.archive
 | A13 | 스키마를 Flyway 순수 SQL로 | design.md의 DDL을 번역 없이 옮겨 문서와 코드의 표류를 막음 | Liquibase — 단일 DB에서 추상화 이점 없음 / `ddl-auto` — 스키마가 버전 관리되지 않음 |
 | A14 | Docker 데몬을 원격 서버에 둠 | 개발 노트북에 Docker를 두지 않는 환경 제약 | 로컬 데몬 — 선택지가 아니었음. 대가는 바인드 마운트 불가와 테스트 지연 ([infra.md](./infra.md) §5) |
 | A15 | Spring Boot 4 로 시작 | Boot 3.x는 2026-06-30 자로 전 브랜치 OSS 지원 종료. 신규 프로젝트라 3→4 마이그레이션 비용(breaking change 115건)이 발생하지 않음 | Boot 3.5 — 예제·레퍼런스는 많지만 보안 패치가 끊긴 상태로 시작하게 됨 |
+| A16 | 프론트를 React + Vite + TS, 서버 상태는 TanStack Query | 이 클라이언트의 난점은 렌더링이 아니라 **SSE·폴링 두 경로가 같은 서버 상태를 갱신**하는 것(§7.3 "화면의 근거는 DB 조회"). 무효화·재조회·폴링 주기가 라이브러리의 기본 기능 | 바닐라 TS — W3 에디터에서 상태 관리를 직접 만들게 되어 재작성 / Svelte — 번들은 가볍지만 SSE+캐시+Worker 조합의 참고 자료가 적어 일정 리스크(§0)를 키움 |
 
 ---
 
