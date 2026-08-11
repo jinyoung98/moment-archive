@@ -262,6 +262,11 @@ docker compose images --format json
 
 출력된 digest를 `image: minio/minio@sha256:…` 형태로 박고, 커밋 메시지에 고정 시점을 남긴다. `minio/mc`도 같이 처리한다.
 
+> 📌 **테스트 쪽도 같은 순간에 고정한다.** `IntegrationTest` 의 MinIO 컨테이너가 아직
+> `minio/minio:latest` 를 쓰고 있다. compose 만 고정하면 상시 스택과 테스트가 서로 다른
+> 버전을 보게 되고, 그러면 "테스트는 통과하는데 서버에서만 다르게 동작한다" 를 만난다.
+> Postgres 는 이미 `postgres:16-alpine` 로 양쪽이 같다.
+
 ---
 
 ## 5. 원격 데몬의 제약 — 코드 작성 전에 알아야 할 것

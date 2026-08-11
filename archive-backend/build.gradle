@@ -28,6 +28,12 @@ dependencies {
     implementation 'org.flywaydb:flyway-database-postgresql'
     runtimeOnly 'org.postgresql:postgresql'
 
+    // 스토리지는 MinIO 가 아니라 S3 API 에 의존한다. MinIO 자체 SDK(io.minio)를 쓰면
+    // 나중에 실제 S3 로 옮길 때 클라이언트 코드를 다시 쓰게 된다. ADR A17 참조.
+    // Boot 4 BOM 은 awssdk 를 관리하지 않으므로 BOM 을 직접 가져온다.
+    implementation platform('software.amazon.awssdk:bom:2.51.4')
+    implementation 'software.amazon.awssdk:s3'
+
     // Boot 4 는 테스트 스타터도 기술별로 쪼개졌다. 예전의 spring-boot-starter-test 하나가 아니다.
     testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-data-jdbc-test'

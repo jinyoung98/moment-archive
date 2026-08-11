@@ -24,3 +24,14 @@ spring:
 
 server:
   port: 8080
+
+archive:
+  storage:
+    # 로컬 실행 시에는 서버의 MinIO 를 바라본다. 자격은 서버 .env 의 MINIO_ROOT_* 와 같다.
+    # 실제 값은 application-local.yml 에 두고 커밋하지 않는다 (docs/infra.md §6).
+    endpoint: ${S3_ENDPOINT:http://localhost:9000}
+    access-key: ${S3_ACCESS_KEY:}
+    secret-key: ${S3_SECRET_KEY:}
+    bucket: ${S3_BUCKET:archive}
+    # MinIO 는 리전을 쓰지 않지만 SDK 가 서명 계산에 요구한다. 실제 S3 로 옮기면 여기가 바뀐다.
+    region: ${S3_REGION:us-east-1}
