@@ -1,6 +1,6 @@
 -- W1 기준선 스키마.
--- design.md §5.2 ~ §5.4 의 DDL을 그대로 옮긴 것이다. 설계 문서가 원본이므로,
--- 스키마를 바꿀 때는 design.md 를 같은 커밋에서 함께 고친다.
+-- schema.md §5.2 ~ §5.4 의 DDL을 그대로 옮긴 것이다. 설계 문서가 원본이므로,
+-- 스키마를 바꿀 때는 schema.md 를 같은 커밋에서 함께 고친다.
 --
 -- W1 범위는 users / media_assets / media_derivatives 세 개까지다.
 -- upload_sessions, processing_jobs, records 계열은 W2~W3 에서 별도 마이그레이션으로 추가한다.

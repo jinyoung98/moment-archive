@@ -120,7 +120,7 @@ docker compose exec postgres psql -U archive -d archive -c '\dt'
 `Did not find any relations.` 가 나오면 정상이다. 테이블은 애플리케이션이 Flyway 로 만든다.
 
 여기까지 되면 상시 스택은 완성이다. 버킷은 **하나**(`archive`)이고 원본·파생물은 접두사로
-나눈다 — `originals/ab/cd/…`, `derivatives/…`. [design.md](./design.md) §5.3 의
+나눈다 — `originals/ab/cd/…`, `derivatives/…`. [schema.md](./schema.md) §5.3 의
 `storage_key` 예시와 같은 구조다.
 
 ### 2.6 막혔을 때
