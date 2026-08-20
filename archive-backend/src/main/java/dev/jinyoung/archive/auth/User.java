@@ -7,7 +7,7 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.relational.core.mapping.Column;
 import org.springframework.data.relational.core.mapping.Table;
 
-/** schema.md §5.2. 자체 회원가입 없음 — 소셜 제공자 신원만 담는다. */
+/** schema.md §5.2. 자체 회원가입 없음 — 소셜 제공자 신원만 보관. */
 @Table("users")
 public record User(
         @Id UUID id,

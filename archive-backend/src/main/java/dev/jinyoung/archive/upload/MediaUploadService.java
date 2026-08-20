@@ -21,8 +21,7 @@ import dev.jinyoung.archive.media.StoredOriginal;
 /**
  * W1 단일 파일 업로드. 청크·세션 없음 (pipeline.md 는 W2 이후 프로토콜).
  *
- * 스토리지 계층은 DB 를 모르는 채로 끝났으므로(media 패키지), 자산 행을 쓰는 것이 여기서
- * 처음 등장한다.
+ * 스토리지 계층(media 패키지)은 DB 를 모르는 채로 끝남 — 자산 행 기록은 여기서 처음 등장.
  */
 @Service
 public class MediaUploadService {
@@ -75,7 +74,7 @@ public class MediaUploadService {
             return new UploadOriginalResponse(inserted.id(), inserted.status(), false);
         } catch (DuplicateKeyException e) {
             // 같은 사용자가 같은 파일을 동시에 두 번 올린 경합. UNIQUE(owner_id, content_hash)
-            // 충돌은 에러가 아니라 정상 경로다 (pipeline.md §10.1).
+            // 충돌은 에러가 아닌 정상 경로 (pipeline.md §10.1).
             MediaAsset asset = assets.findByOwnerIdAndContentHash(ownerId, stored.hash().hex()).orElseThrow(() -> e);
             return new UploadOriginalResponse(asset.id(), asset.status(), true);
         }

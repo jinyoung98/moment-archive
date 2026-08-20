@@ -19,13 +19,13 @@
 ## 지금 해야 할 일
 
 > **다음 첫 작업: 처리.**
-> `PROBE`(EXIF·해시 재검증) → `THUMB`(libvips) 를 **동기 실행**으로 붙인다. W1 은 큐가
-> 없으므로 업로드 요청 안에서 바로 돌린다. `MediaAssetStatus` 를 `INGESTED → PROBED →
-> THUMBED` 로 전이시키는 것이 이번 작업의 산출물.
+> `PROBE`(EXIF·해시 재검증) → `THUMB`(libvips) 를 **동기 실행**으로 추가. W1 은 큐 없이
+> 업로드 요청 안에서 바로 실행. 산출물은 `MediaAssetStatus` 의 `INGESTED → PROBED →
+> THUMBED` 전이.
 >
-> 인증은 아직 없다 — 업로드는 `DevUserProvider` 고정 사용자로 동작 중이다
-> (`archive-backend/.../auth/DevUserProvider.java` 주석 참조). 실제 소셜 로그인이 붙으면
-> 이 클래스는 삭제되고 컨트롤러가 SecurityContext 에서 owner_id 를 꺼내도록 한 줄만 바뀐다.
+> 인증 미구현 — 업로드는 `DevUserProvider` 고정 사용자로 동작 (근거는 해당 클래스 주석).
+> 소셜 로그인 도입 시 이 클래스는 삭제, 컨트롤러가 SecurityContext 에서 owner_id 를
+> 꺼내는 한 줄로 대체.
 
 ### W1 수직 슬라이스
 
