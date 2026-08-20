@@ -19,6 +19,7 @@ package dev.jinyoung.archive.media;
 public final class StorageKeys {
 
     public static final String ORIGINALS_PREFIX = "originals/";
+    public static final String DERIVATIVES_PREFIX = "derivatives/";
 
     private StorageKeys() {
     }
@@ -26,5 +27,23 @@ public final class StorageKeys {
     public static String original(ContentHash hash) {
         String hex = hash.hex();
         return ORIGINALS_PREFIX + hex.substring(0, 2) + "/" + hex.substring(2, 4) + "/" + hex;
+    }
+
+    /**
+     * 파생물 키. 원본 해시 기준이라 재실행 시 같은 자리 (pipeline.md §6, I3·I9). recipe·버전을
+     * 파일명에 실어 한 원본의 파생물들이 한 디렉토리에 모임.
+     *
+     * <pre>
+     *   derivatives/ab/cd/abcdef.../THUMB_256_1.webp
+     * </pre>
+     *
+     * originals 와 같은 2/2 샤딩 — {@code derivatives/} 하위 디렉토리 폭주 방지 (originals 와 동일 근거).
+     * pipeline.md §6 예시({@code derivatives/{hash}/...})에 샤딩을 더한 형태.
+     */
+    public static String derivative(ContentHash originalHash, DerivativeRecipe recipe) {
+        String hex = originalHash.hex();
+        return DERIVATIVES_PREFIX
+                + hex.substring(0, 2) + "/" + hex.substring(2, 4) + "/" + hex + "/"
+                + recipe.recipeName() + "_" + recipe.version() + ".webp";
     }
 }

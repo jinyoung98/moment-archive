@@ -11,21 +11,22 @@
 > 새 판단이 나오면 여기가 아니라 **ADR·interview-notes·코드 주석**으로 보낸다.
 > 세션 기록은 [journal/sessions.md](./journal/sessions.md) 에 쌓고 여기서는 읽지 않는다.
 
-- **최종 갱신**: 2026-08-13
-- **현재 단계**: W1 진행 중 — 하네스·스토리지·업로드 완료, 처리(PROBE/THUMB) 착수 전
+- **최종 갱신**: 2026-08-20
+- **현재 단계**: W1 진행 중 — 하네스·스토리지·업로드·처리(PROBE/THUMB 동기) 완료, 인증 착수 전
 
 ---
 
 ## 지금 해야 할 일
 
-> **다음 첫 작업: 처리.**
-> `PROBE`(EXIF·해시 재검증) → `THUMB`(libvips) 를 **동기 실행**으로 추가. W1 은 큐 없이
-> 업로드 요청 안에서 바로 실행. 산출물은 `MediaAssetStatus` 의 `INGESTED → PROBED →
-> THUMBED` 전이.
+> **다음 첫 작업: 인증 (소셜 로그인 1종).**
+> `DevUserProvider` 를 대체. 컨트롤러가 SecurityContext 에서 owner_id 를 꺼내면 그 클래스는
+> 삭제 (근거는 해당 클래스 주석). 그다음이 프론트 — 파일 선택 + 결과 표시(썸네일). W1 완료
+> 기준("브라우저에서 사진 1장 → 썸네일")을 채우려면 파생물 바이트를 내려주는 조회 경로도
+> 이때 함께 필요.
 >
-> 인증 미구현 — 업로드는 `DevUserProvider` 고정 사용자로 동작 (근거는 해당 클래스 주석).
-> 소셜 로그인 도입 시 이 클래스는 삭제, 컨트롤러가 SecurityContext 에서 owner_id 를
-> 꺼내는 한 줄로 대체.
+> **처리는 완료.** `PROBE`(metadata-extractor·EXIF) → `THUMB`(libvips CLI) 동기 실행.
+> `INGESTED → PROBED → THUMBED` 전이. 손상 파일은 PROBE 에서 `FAILED`. 판단은 ADR A18·A19,
+> interview-notes §3. THUMB seam 은 `Thumbnailer` 인터페이스(`processing.thumb`).
 
 ### W1 수직 슬라이스
 
@@ -34,7 +35,7 @@
 - [x] 하네스 — Testcontainers + `Clock` 주입, 통합 테스트 4건 통과
 - [x] 스토리지 — S3 추상화, 해시 기반 키, CAS 저장/조회. `I1`·`I2` 를 MinIO 위에서 검증
 - [x] 업로드 — 단일 파일 `PUT /media` (청크 없음). `media_assets` 행 생성/재사용, owner 는 임시 고정 사용자
-- [ ] 처리 — `PROBE`(EXIF) + `THUMB`(libvips), **동기 실행**
+- [x] 처리 — `PROBE`(EXIF) + `THUMB`(libvips) **동기 실행**. 응답에 `thumbKey` 포함. THUMB 은 libvips 있는 환경에서만 실측(그 외 `assumeTrue` 스킵)
 - [ ] 인증 — 소셜 로그인 1종 (지금은 `DevUserProvider` 로 대체 중)
 - [ ] 프론트 — `archive-frontend/` 스캐폴딩, 파일 선택 + 결과 표시, 스타일 없음 (ADR A16)
 
@@ -48,6 +49,10 @@ export TESTCONTAINERS_HOST_OVERRIDE=192.168.133.221
 ```
 
 상시 스택 Postgres 호스트 포트는 **5434**. 서버 셋업·제약은 [infra.md](./infra.md).
+
+THUMB 를 로컬에서 실측하려면 libvips 필요 (`brew install vips` → `vips` 가 PATH 에).
+없으면 앱은 그대로 뜨고 THUMB 만 건너뜀(PROBED 유지), 관련 테스트는 스킵. 실행 파일 경로는
+`archive.processing.thumbnail.command` 로 덮어쓸 수 있음.
 
 ---
 

@@ -20,6 +20,7 @@
 | `./gradlew test` — Postgres 만, 테스트 4건 | **23초** | 2026-08-06 |
 | `./gradlew clean test` — Postgres+MinIO, 테스트 20건 | **10초** | 2026-08-11 |
 | `./gradlew test` — Postgres+MinIO, 테스트 23건 | **58초** | 2026-08-13 |
+| `./gradlew test` — Postgres+MinIO, 테스트 29건(THUMB 2건 스킵) | **13초** | 2026-08-20 |
 
 > **테스트가 5배로 늘었는데 시간이 줄어든 것을 개선으로 읽지 말 것.** 조건이 다르다 —
 > 서버에 이미지가 캐시된 상태였고, Gradle 데몬도 떠 있었다. 8/6 의 23초에는 이미지 pull 이
@@ -27,6 +28,31 @@
 > 아직 따로 재지 않았다. 성능 기준선은 여기서 재지 않는다 ([infra.md](../infra.md) §5).
 > 8/13 의 58초도 같은 이유로 앞선 값들과 비교하지 말 것 — 직전에 서버 `docker` 를
 > 재시작해 이미지 캐시가 비어 있었다 (아래 항목 참조).
+
+---
+
+## 2026-08-20 — 처리 (PROBE + THUMB) 동기 실행
+
+W1 수직 슬라이스의 처리 단계. 업로드 요청 안에서 `PROBE → THUMB` 를 큐 없이 바로 돌린다
+(`INGESTED → PROBED → THUMBED`). 정본은 ADR A18·A19, interview-notes §3.
+
+- **libvips 를 CLI 로, 인터페이스 뒤에 뒀다.** JNI/FFM 바인딩은 네이티브 링크 실패가 컨텍스트
+  기동을 통째로 막는다. `Thumbnailer` 인터페이스 + `vips thumbnail` 서브프로세스면 libvips
+  없어도 앱은 뜨고 THUMB 만 `isAvailable()` 로 건너뛴다 — `ObjectStorage` seam 과 같은 꼴
+- **이 노트북엔 libvips 도 ffmpeg 도 없다.** 그래서 THUMB 통합 단정은 `assumeTrue` 로 스킵되고
+  PROBE·상태전이·멱등(I9)만 실측했다. 골든셋 부재 시 스킵과 같은 결(roadmap §5). THUMB 바이트
+  실측은 `brew install vips` 한 환경에서 별도로 돌려야 함 — **아직 THUMB 산출 자체는 미실측**
+- **PROBE 는 순수 Java(metadata-extractor).** libvips 를 CLI 로 뺀 것과 대비되는데 의도한 것 —
+  PROBE 를 "컨테이너도 네이티브도 없는" 단위 테스트 층에 두려고. 영상 ffprobe 는 W2
+- **랜덤 바이트를 이미지로 위장한 기존 테스트가 깨졌다.** 처리가 동기라 PROBE 가 그걸 손상으로
+  판정한다. `ImageIO` 로 실제 JPEG 을 만들게 바꾸고, 손상 파일 → `FAILED` 케이스를 따로 고정
+- 파생물 키는 `derivatives/ab/cd/{원본해시}/THUMB_256_1.webp` — pipeline §6 에 originals 와 같은
+  2/2 샤딩을 더했다(문서도 같은 커밋에서 수정). 행은 `ON CONFLICT` UPSERT 로 멱등
+- libvips 부재를 자산 `FAILED` 로 보지 않는다 — 배포 문제이지 미디어 문제가 아니므로 `PROBED`
+  유지(P5). 이 구분이 상태 머신을 어지럽히지 않는 열쇠
+
+> 정본: ADR A18·A19([design.md](../design.md) §11), [interview-notes.md](../interview-notes.md) §3,
+> `processing/` 패키지와 `MediaProcessingIntegrationTest.java` 주석.
 
 ---
 

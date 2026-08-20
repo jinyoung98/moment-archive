@@ -354,10 +354,10 @@ DO UPDATE SET storage_key  = EXCLUDED.storage_key,
 ### 결정론적 storage_key
 
 ```
-derivatives/{content_hash}/{recipe}_{recipe_ver}.webp
+derivatives/{ab}/{cd}/{content_hash}/{recipe}_{recipe_ver}.webp
 ```
 
-랜덤 UUID를 키로 쓰면 재실행할 때마다 새 객체가 생기고 이전 것이 고아가 된다. 해시 기반이면 같은 자리에 덮어쓰므로 쓰레기가 남지 않는다.
+`{content_hash}`는 **원본**의 해시다. 재실행 시 키를 다시 계산해도 같은 자리를 가리키므로 덮어쓰기로 멱등해진다(랜덤 UUID를 키로 쓰면 재실행마다 새 객체가 생기고 이전 것이 고아가 된다). 앞 4자를 2/2로 쪼갠 샤딩은 `originals/`와 같은 이유 — `derivatives/` 하위 디렉토리 폭주를 막아 `mc ls`·부분 동기화가 가능하게 한다(`StorageKeys` 참조). 구현은 `StorageKeys.derivative`.
 
 ---
 

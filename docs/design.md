@@ -446,6 +446,8 @@ archive-frontend/
 | A15 | Spring Boot 4 로 시작 | Boot 3.x는 2026-06-30 자로 전 브랜치 OSS 지원 종료. 신규 프로젝트라 3→4 마이그레이션 비용(breaking change 115건)이 발생하지 않음 | Boot 3.5 — 예제·레퍼런스는 많지만 보안 패치가 끊긴 상태로 시작하게 됨 |
 | A16 | 프론트를 React + Vite + TS, 서버 상태는 TanStack Query | 이 클라이언트의 난점은 렌더링이 아니라 **SSE·폴링 두 경로가 같은 서버 상태를 갱신**하는 것(§7.3 "화면의 근거는 DB 조회"). 무효화·재조회·폴링 주기가 라이브러리의 기본 기능 | 바닐라 TS — W3 에디터에서 상태 관리를 직접 만들게 되어 재작성 / Svelte — 번들은 가볍지만 SSE+캐시+Worker 조합의 참고 자료가 적어 일정 리스크(§0)를 키움 |
 | A17 | 스토리지를 AWS SDK v2 로 접근하고 MinIO 를 "S3 의 한 구현" 으로만 취급 | 실제 S3 로 옮길 때 바뀌는 것이 엔드포인트와 자격뿐이다. 업로드에 `x-amz-checksum-sha256` 을 실어 **서버가 수신 바이트를 직접 대조하게** 만든 것도 규격 기능이라 따라왔다 — 손상된 원본이 저장되는 경로가 닫힌다 (I1) | MinIO 자체 SDK(`io.minio`) — API 는 더 단순하지만 스토리지를 바꿀 때 클라이언트 코드를 다시 씀. MinIO 는 목적이 아니라 로컬에서 S3 를 흉내내는 수단이다 |
+| A18 | PROBE 의 EXIF 추출을 `metadata-extractor`(순수 Java)로 | 네이티브 의존이 없어 libvips 없는 개발 노트북·CI 에서도 그대로 돈다. `media` 3계층 검증 전략(design.md §10)에서 PROBE 를 "컨테이너 없는 단위 테스트" 층에 놓을 수 있게 됨 | ffprobe/exiftool CLI — 서브프로세스라 검증 환경마다 바이너리가 필요. 사진 EXIF 에는 과함 (영상 ffprobe 는 W2 별도) |
+| A19 | THUMB 의 libvips 를 `Thumbnailer` 인터페이스 뒤 **CLI 서브프로세스**(`vips thumbnail`)로 | `ObjectStorage`↔`S3ObjectStorage` 와 같은 seam. 클래스패스에 네이티브 심볼이 붙지 않아 libvips 없는 환경에서도 앱 컨텍스트가 뜨고 THUMB 만 `isAvailable()` 로 스킵된다. libvips 부재는 배포 문제이지 미디어 문제가 아니므로 자산을 FAILED 로 만들지 않고 PROBED 에 남긴다 (P5) | JNI/FFM 바인딩(`vips-ffm` 등) — 성숙도가 낮고 네이티브 링크 실패가 컨텍스트 기동 전체를 막음 / 순수 Java(Thumbnailator·ImageIO) — libvips 스택 결정과 HEIC 지원(§13)을 포기 |
 
 ---
 

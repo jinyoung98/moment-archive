@@ -47,4 +47,28 @@ public record MediaAsset(
                 null, null, null, null, null, null, null, null, null, null,
                 MediaAssetStatus.INGESTED, null, null, createdAt);
     }
+
+    /**
+     * PROBE 결과 반영 → 상태 PROBED. 20필드 record 를 서비스에서 직접 조립하지 않게 여기 캡슐화
+     * (인자 순서 실수는 컴파일을 통과하므로). 인자는 원시 타입뿐 — media 가 processing 을 모름.
+     */
+    public MediaAsset probed(
+            Instant capturedAt, String capturedAtSrc, Integer tzOffsetMin,
+            BigDecimal gpsLat, BigDecimal gpsLon,
+            Integer width, Integer height, Integer orientation, Integer durationMs) {
+        return new MediaAsset(
+                id, ownerId, contentHash, byteSize, mimeType, kind, storageKey,
+                capturedAt, capturedAtSrc, tzOffsetMin, gpsLat, gpsLon,
+                width, height, orientation, durationMs, phash,
+                MediaAssetStatus.PROBED, orphanedAt, purgeAfter, createdAt);
+    }
+
+    /** 메타 변경 없는 상태 전이 (예: PROBED → THUMBED, → FAILED). */
+    public MediaAsset withStatus(MediaAssetStatus newStatus) {
+        return new MediaAsset(
+                id, ownerId, contentHash, byteSize, mimeType, kind, storageKey,
+                capturedAt, capturedAtSrc, tzOffsetMin, gpsLat, gpsLon,
+                width, height, orientation, durationMs, phash,
+                newStatus, orphanedAt, purgeAfter, createdAt);
+    }
 }

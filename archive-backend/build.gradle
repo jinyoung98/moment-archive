@@ -34,6 +34,11 @@ dependencies {
     implementation platform('software.amazon.awssdk:bom:2.51.4')
     implementation 'software.amazon.awssdk:s3'
 
+    // PROBE 의 EXIF 추출. 순수 Java 라 네이티브 의존이 없어 어디서든(로컬·CI) 돈다. ADR A18.
+    // THUMB 의 libvips 는 인터페이스(Thumbnailer) 뒤 CLI 구현이라 클래스패스에 네이티브가
+    // 붙지 않는다 — 둘의 검증 전략이 다른 이유다. ADR A19.
+    implementation 'com.drewnoakes:metadata-extractor:2.19.0'
+
     // Boot 4 는 테스트 스타터도 기술별로 쪼개졌다. 예전의 spring-boot-starter-test 하나가 아니다.
     testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-data-jdbc-test'
