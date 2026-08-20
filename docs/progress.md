@@ -40,7 +40,7 @@
 - [x] 스토리지 — S3 추상화, 해시 기반 키, CAS 저장/조회. `I1`·`I2` 를 MinIO 위에서 검증
 - [x] 업로드 — 단일 파일 `PUT /media` (청크 없음). `media_assets` 행 생성/재사용, owner 는 임시 고정 사용자
 - [x] 처리 — `PROBE`(EXIF) + `THUMB`(libvips) **동기 실행**. 응답에 `thumbKey` 포함. THUMB 은 libvips 있는 환경에서만 실측(그 외 `assumeTrue` 스킵)
-- [x] 인증 — 구글 OIDC + 쿠키 세션 + 이메일 허용목록. `CurrentUser` 로 owner_id. **실제 구글 왕복은 자격 넣고 브라우저로 1회 수동 확인 필요**
+- [x] 인증 — 구글 OIDC + 쿠키 세션 + 이메일 허용목록. `CurrentUser` 로 owner_id. **실제 구글 로그인 왕복 → `/api/me` 까지 브라우저로 검증 완료** (2026-08-20)
 - [ ] 프론트 — `archive-frontend/` 스캐폴딩, 파일 선택 + 결과 표시, 스타일 없음 (ADR A16). 썸네일 조회 엔드포인트도 함께
 
 ### 실행 환경
@@ -77,7 +77,13 @@ archive:
     allowed-emails: dev.jinyoung98@gmail.com   # 여러 명이면 쉼표로. 비우면 전체 허용(경고)
 ```
 
-테스트는 더미 자격을 주입하므로(IntegrationTest) 이 설정 없이도 돈다.
+테스트는 더미 자격을 주입하므로(IntegrationTest) 이 설정 없이도 돈다. (자격을 env 로 줄 거면
+`application.yml` 의 `${GOOGLE_CLIENT_ID:}` 등이 그대로 받으므로 `application-local.yml` 없이
+`~/.zshenv`·direnv `.envrc` 만으로도 됨.)
+
+`./gradlew :archive-backend:bootRun` 은 테스트와 달리 **상시 스택(Postgres 5434·MinIO 9000)에
+노트북이 직접 닿아야** 한다 — 서버 `.env` 의 `BIND_HOST=<사설 IP>` 로 열고(infra.md §3.1),
+`nc -z 192.168.133.221 5434` 로 확인. THUMB 실측엔 libvips 도 필요.
 
 ---
 
