@@ -11,18 +11,21 @@
 > 새 판단이 나오면 여기가 아니라 **ADR·interview-notes·코드 주석**으로 보낸다.
 > 세션 기록은 [journal/sessions.md](./journal/sessions.md) 에 쌓고 여기서는 읽지 않는다.
 
-- **최종 갱신**: 2026-08-11
-- **현재 단계**: W1 진행 중 — 하네스·스토리지 완료, 업로드 착수 전
+- **최종 갱신**: 2026-08-13
+- **현재 단계**: W1 진행 중 — 하네스·스토리지·업로드 완료, 처리(PROBE/THUMB) 착수 전
 
 ---
 
 ## 지금 해야 할 일
 
-> **다음 첫 작업: 업로드.**
-> 단일 파일 `PUT` 엔드포인트 → `ContentAddressedStore.storeOriginal()` → `media_assets` 행 생성.
-> 스토리지 계층은 DB 를 모르는 상태로 끝냈으므로, 자산 행을 쓰는 것이 여기서 처음 나온다.
-> 중복(`reused == true`)일 때 기존 자산을 재사용하는 경로를 같이 만든다 —
-> `UNIQUE (owner_id, content_hash)` 충돌은 에러가 아니라 정상 경로다 (interview-notes.md §7).
+> **다음 첫 작업: 처리.**
+> `PROBE`(EXIF·해시 재검증) → `THUMB`(libvips) 를 **동기 실행**으로 붙인다. W1 은 큐가
+> 없으므로 업로드 요청 안에서 바로 돌린다. `MediaAssetStatus` 를 `INGESTED → PROBED →
+> THUMBED` 로 전이시키는 것이 이번 작업의 산출물.
+>
+> 인증은 아직 없다 — 업로드는 `DevUserProvider` 고정 사용자로 동작 중이다
+> (`archive-backend/.../auth/DevUserProvider.java` 주석 참조). 실제 소셜 로그인이 붙으면
+> 이 클래스는 삭제되고 컨트롤러가 SecurityContext 에서 owner_id 를 꺼내도록 한 줄만 바뀐다.
 
 ### W1 수직 슬라이스
 
@@ -30,9 +33,9 @@
 
 - [x] 하네스 — Testcontainers + `Clock` 주입, 통합 테스트 4건 통과
 - [x] 스토리지 — S3 추상화, 해시 기반 키, CAS 저장/조회. `I1`·`I2` 를 MinIO 위에서 검증
-- [ ] 업로드 — 단일 파일 `PUT` (청크 없음)
+- [x] 업로드 — 단일 파일 `PUT /media` (청크 없음). `media_assets` 행 생성/재사용, owner 는 임시 고정 사용자
 - [ ] 처리 — `PROBE`(EXIF) + `THUMB`(libvips), **동기 실행**
-- [ ] 인증 — 소셜 로그인 1종
+- [ ] 인증 — 소셜 로그인 1종 (지금은 `DevUserProvider` 로 대체 중)
 - [ ] 프론트 — `archive-frontend/` 스캐폴딩, 파일 선택 + 결과 표시, 스타일 없음 (ADR A16)
 
 ### 실행 환경

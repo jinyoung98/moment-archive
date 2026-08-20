@@ -19,11 +19,43 @@
 |---|---|---|
 | `./gradlew test` — Postgres 만, 테스트 4건 | **23초** | 2026-08-06 |
 | `./gradlew clean test` — Postgres+MinIO, 테스트 20건 | **10초** | 2026-08-11 |
+| `./gradlew test` — Postgres+MinIO, 테스트 23건 | **58초** | 2026-08-13 |
 
 > **테스트가 5배로 늘었는데 시간이 줄어든 것을 개선으로 읽지 말 것.** 조건이 다르다 —
 > 서버에 이미지가 캐시된 상태였고, Gradle 데몬도 떠 있었다. 8/6 의 23초에는 이미지 pull 이
 > 섞여 있다. 두 컨테이너를 `Startables` 로 병렬 기동한 것만이 실제 개선분이고, 그 크기는
 > 아직 따로 재지 않았다. 성능 기준선은 여기서 재지 않는다 ([infra.md](../infra.md) §5).
+> 8/13 의 58초도 같은 이유로 앞선 값들과 비교하지 말 것 — 직전에 서버 `docker` 를
+> 재시작해 이미지 캐시가 비어 있었다 (아래 항목 참조).
+
+---
+
+## 2026-08-13 — 업로드 엔드포인트
+
+`PUT /media` — `MultipartFile` → temp file → `ContentAddressedStore.storeOriginal()` →
+`media_assets` 행 find-or-create. 통합 테스트 3건 통과.
+
+- **인증이 없는 채로 `owner_id` 를 채워야 했다.** `DevUserProvider` 를 만들어
+  provider+provider_uid 로 find-or-create 하게 했다 — 이 로직은 실제 소셜 로그인이 붙어도
+  그대로 남는다, 신원의 출처(고정값 → OAuth 토큰)만 바뀐다. 컨트롤러가 SecurityContext 에서
+  `owner_id` 를 꺼내는 순간 이 클래스는 통째로 삭제된다
+- **`media_assets`/`users` 가 이 프로젝트 첫 Spring Data JDBC 엔티티다.** 클라이언트가
+  UUID PK 를 미리 할당(`UUID.randomUUID()`)하는데, `CrudRepository.save()` 는 PK 가
+  null 이 아니면 "기존 행"으로 보고 UPDATE 를 시도해 0행 갱신으로 실패한다. `Persistable`
+  구현 대신 `JdbcAggregateOperations.insert()` 를 직접 호출해 신규/기존 판단 자체를
+  건너뛰었다 — 엔티티가 record 로 남을 수 있는 이유이기도 하다
+- **Boot 4 / Jackson 3 로 옮겨간 패키지를 또 한 번 밟았다** (Q&A 1장의 Boot 4 항목과 같은
+  종류). 테스트에서 `@AutoConfigureMockMvc` 는 `org.springframework.boot.webmvc.test.autoconfigure`,
+  `ObjectMapper` 는 `tools.jackson.databind` 로 옮겨져 있었다. `compileTestJava` 를 먼저
+  돌려 컨테이너 기동 전에 잡아냈다
+- **서버에 얹은 Kubernetes 가 Docker 를 막았다.** 통합 테스트가 전부
+  `iptables: No chain/target/match by that name` 로 컨테이너 기동에 실패했는데, 원인은
+  `kube-proxy` 가 iptables 규칙을 재조정하며 Docker 의 `DOCKER` 체인과 충돌한 것으로
+  보인다. 그 노드의 K8s 런타임이 `containerd` 직접이라(`dockerd` 를 안 거침) `docker
+  restart` 로 안전하게 복구됐고 파드에는 영향이 없었다. **재발 가능성은 남아 있다** —
+  `kube-proxy` 가 다시 규칙을 정리하면 또 깨질 수 있어, 반복되면 격리(예: K8s 안에
+  Docker-in-Docker 파드) 를 검토해야 한다. 이 재발 여부는 두 시스템을 한 서버에 같이
+  둔 이상 계속 지켜봐야 하는 항목이다
 
 ---
 
