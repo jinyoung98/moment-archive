@@ -29,6 +29,7 @@ dist/
 # --- 로컬 환경 ---
 .env
 .env.local
+.envrc
 application-local.yml
 application-local.yaml
 **/src/main/resources/application-local.*
