@@ -14,9 +14,8 @@ import software.amazon.awssdk.services.s3.S3Client;
 /**
  * S3 클라이언트 빈.
  *
- * <p>동기 클라이언트를 쓴다. 이 프로젝트의 스토리지 호출자는 워커이고, 워커는 이미
- * 자기 스레드에서 도는 데다 진행 상황을 {@code checkpoint} 로 남기며 순차적으로 움직인다
- * (pipeline.md §4). 비동기 클라이언트를 얹으면 그 순차성을 다시 조립하는 코드만 늘어난다.
+ * 동기 클라이언트 사용. 스토리지 호출자는 워커, 이미 자체 스레드에서 {@code checkpoint}
+ * 기록하며 순차 진행 (pipeline.md §4). 비동기 클라이언트는 그 순차성 재조립 코드만 증가.
  */
 @Configuration
 @EnableConfigurationProperties(StorageProperties.class)
@@ -28,8 +27,8 @@ public class StorageConfig {
                 .region(Region.of(properties.region()))
                 .credentialsProvider(StaticCredentialsProvider.create(
                         AwsBasicCredentials.create(properties.accessKey(), properties.secretKey())))
-                // MinIO 는 가상 호스트 스타일(bucket.host)을 쓰지 않는다. 이걸 켜지 않으면
-                // SDK 가 존재하지 않는 호스트명을 조립해 DNS 에서 실패한다.
+                // MinIO: 가상 호스트 스타일(bucket.host) 미사용. 미설정 시 SDK 가 존재하지
+                // 않는 호스트명 조립 → DNS 실패.
                 .forcePathStyle(true);
 
         if (properties.endpoint() != null && !properties.endpoint().isBlank()) {

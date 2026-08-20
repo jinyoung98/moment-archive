@@ -11,17 +11,14 @@ import org.springframework.stereotype.Component;
 /**
  * 내용으로 주소를 정하는 저장소 (content-addressed storage).
  *
- * <p>{@link ObjectStorage} 가 "이 키에 이 바이트를 써라" 라면, 이 층은 <b>키를 정하고
- * 쓸지 말지를 판단한다.</b> 판단은 하나뿐이다 — 같은 내용이 이미 그 자리에 있으면
- * 전송하지 않는다.
+ * {@link ObjectStorage} 가 "이 키에 이 바이트 저장"이라면, 이 층은 키 결정과 저장
+ * 여부 판단 담당. 판단은 단일 — 같은 내용이 이미 존재하면 전송 생략.
  *
- * <p>중복 제거가 DB 의 {@code UNIQUE (owner_id, content_hash)} 와 겹쳐 보이지만 막는 것이
- * 다르다. DB 제약은 <b>같은 사용자의</b> 자산 행이 둘 생기는 것을 막고, 이쪽은 물리 객체가
- * 둘 생기는 것을 막는다. 사용자가 여럿이면 자산 행은 둘이고 파일은 하나다 — I2 가 말하는
- * "물리적으로 하나" 는 이 층에서만 성립한다.
+ * DB {@code UNIQUE (owner_id, content_hash)} 와 유사해 보이나 막는 대상 상이. DB
+ * 제약은 동일 사용자 자산 행 중복 방지, 이쪽은 물리 객체 중복 방지. 다중 사용자 시
+ * 자산 행은 여럿, 파일은 하나 — I2 의 "물리적으로 하나"는 이 층에서만 성립.
  *
- * <p>이 층은 DB 를 모른다. 자산 행을 쓰는 것은 업로드의 일이고, 여기까지가 W1 스토리지
- * 계층의 경계다.
+ * 이 층은 DB 미인지. 자산 행 기록은 업로드 담당, 여기까지가 W1 스토리지 계층 경계.
  */
 @Component
 public class ContentAddressedStore {
@@ -33,10 +30,10 @@ public class ContentAddressedStore {
     }
 
     /**
-     * 파일을 내용 해시가 정하는 자리에 놓는다. <b>같은 입력에 몇 번 호출해도 결과가 같다.</b>
+     * 파일을 내용 해시 결정 위치에 저장. 동일 입력 반복 호출 시 결과 동일(멱등).
      *
-     * <p>멱등성이 성질이 아니라 요구사항인 이유는, 이 메서드를 부르는 쪽이 재시도되는 stage 이기
-     * 때문이다 (I9). lease 가 만료되어 회수된 작업은 사실 저장 직후였을 수 있다.
+     * 멱등성이 요구사항인 이유: 호출부가 재시도 대상 stage (I9). lease 만료 회수 작업이
+     * 실제로는 저장 직후였을 가능성.
      */
     public StoredOriginal storeOriginal(Path file, String contentType) throws IOException {
         ContentHash hash = ContentHash.of(file);
@@ -47,19 +44,18 @@ public class ContentAddressedStore {
         if (existing.isPresent() && existing.get().byteSize() == byteSize) {
             return new StoredOriginal(hash, key, byteSize, true);
         }
-        // 키는 있는데 크기가 다르면 앞선 저장이 중간에 끊긴 것이다. 해시가 같은 서로 다른
-        // 내용이라는 설명은 SHA-256 충돌을 뜻하므로 고려 대상이 아니다. 덮어쓰는 것이
-        // 자가 치유이고, 스토리지가 체크섬을 대조하므로 이번 쓰기의 정합성은 보장된다.
+        // 키 존재·크기 불일치 = 이전 저장 중단. 동일 해시·다른 내용이라는 설명은 SHA-256
+        // 충돌 의미라 배제. 덮어쓰기가 자가 치유, 체크섬 대조로 이번 쓰기 정합성 보장.
         storage.put(key, file, contentType, hash);
         return new StoredOriginal(hash, key, byteSize, false);
     }
 
     /**
-     * 저장된 바이트를 처음부터 다시 읽어 해시를 계산한다.
+     * 저장 바이트 전체 재읽기·해시 재계산.
      *
-     * <p>{@link ObjectStat#checksum()} 이 있으면 왕복 한 번으로 끝나는데도 전부 읽는 이유는,
-     * 그 값이 <b>스토리지의 주장</b>이라는 데 있다. I1 이 검증하려는 대상에 스토리지 자신이
-     * 포함되므로, 확인은 실제 바이트로 해야 의미가 있다.
+     * {@link ObjectStat#checksum()} 로 왕복 한 번에 끝낼 수 있음에도 전체 재읽기하는
+     * 이유: 그 값은 스토리지 측 주장일 뿐. I1 검증 대상에 스토리지 자체도 포함되므로
+     * 실제 바이트 확인이 필수.
      */
     public ContentHash hashOf(String storageKey) {
         try (InputStream in = storage.open(storageKey)) {

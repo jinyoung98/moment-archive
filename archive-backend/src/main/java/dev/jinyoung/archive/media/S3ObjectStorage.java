@@ -22,11 +22,11 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 
 /**
- * {@link ObjectStorage} 의 S3 구현. 개발·테스트에서는 MinIO 를 가리킨다.
+ * {@link ObjectStorage} 의 S3 구현. 개발·테스트 환경은 MinIO 대상.
  *
- * <p>모든 SDK 예외를 {@link StorageException} 으로 바꿔 내보낸다. SDK 예외 타입이 상위로
- * 새어 나가면 워커와 서비스 코드가 {@code software.amazon.awssdk} 를 import 하게 되고,
- * 그 순간 스토리지를 갈아 끼울 수 있다는 이 인터페이스의 약속이 형식만 남는다.
+ * 모든 SDK 예외를 {@link StorageException} 으로 변환. SDK 예외 누출 시 워커·서비스
+ * 코드가 {@code software.amazon.awssdk} import, 스토리지 교체 가능성이라는 인터페이스
+ * 약속이 형식만 남음.
  */
 @Component
 public class S3ObjectStorage implements ObjectStorage {
@@ -54,8 +54,8 @@ public class S3ObjectStorage implements ObjectStorage {
                 .bucket(bucket)
                 .key(key)
                 .contentType(contentType)
-                // 서버가 수신 바이트로 SHA-256 을 재계산해 대조한다. 어긋나면 400 이고
-                // 객체는 만들어지지 않는다 — 손상된 원본이 저장되는 경로가 닫힌다 (I1).
+                // 서버가 수신 바이트로 SHA-256 재계산·대조. 불일치 시 400, 객체 미생성 —
+                // 손상 원본 저장 경로 차단 (I1).
                 .checksumSHA256(checksum.base64())
                 .build();
         try {
@@ -82,8 +82,8 @@ public class S3ObjectStorage implements ObjectStorage {
         HeadObjectRequest request = HeadObjectRequest.builder()
                 .bucket(bucket)
                 .key(key)
-                // 이것을 빼면 스토리지는 체크섬 헤더를 아예 보내지 않는다. 기본값이 꺼짐인 것을
-                // 모르면 "MinIO 가 SHA-256 을 보관하지 않는다" 고 결론짓게 된다 — 보관은 한다.
+                // 미설정 시 체크섬 헤더 자체 미전송. 기본값 꺼짐을 모르면 "MinIO 는 SHA-256
+                // 미보관"으로 오판 — 실제로는 보관함.
                 .checksumMode(ChecksumMode.ENABLED)
                 .build();
         try {
@@ -93,8 +93,8 @@ public class S3ObjectStorage implements ObjectStorage {
         } catch (NoSuchKeyException e) {
             return Optional.empty();
         } catch (S3Exception e) {
-            // HEAD 응답에는 본문이 없어서 오류 코드를 실어 보낼 자리가 없다. 그래서 없는 키가
-            // NoSuchKeyException 이 아니라 상태코드만 있는 S3Exception 으로 오는 구현이 있다.
+            // HEAD 응답은 본문 없음 — 오류 코드 전달 지면 없음. 그래서 일부 구현은 없는 키를
+            // NoSuchKeyException 대신 상태코드뿐인 S3Exception 으로 반환.
             if (e.statusCode() == 404) {
                 return Optional.empty();
             }
