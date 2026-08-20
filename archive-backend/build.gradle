@@ -39,6 +39,10 @@ dependencies {
     // 붙지 않는다 — 둘의 검증 전략이 다른 이유다. ADR A19.
     implementation 'com.drewnoakes:metadata-extractor:2.19.0'
 
+    // 소셜 로그인. oauth2-client 스타터가 spring-security 를 함께 끌고 온다. 세션은 httpOnly
+    // 쿠키(JSESSIONID) — JWT 미사용, Redis 미사용 (ADR A20, interview-notes §1). Google 은 OIDC.
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-client'
+
     // Boot 4 는 테스트 스타터도 기술별로 쪼개졌다. 예전의 spring-boot-starter-test 하나가 아니다.
     testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-data-jdbc-test'
@@ -52,6 +56,9 @@ dependencies {
     testImplementation 'org.testcontainers:testcontainers-minio:2.0.5'
     // Thread.sleep 금지의 대체제. CLAUDE.md 코딩 규칙 참조.
     testImplementation 'org.awaitility:awaitility'
+
+    // 실제 Google 왕복 없이 인증된 주체를 주입한다 (oauth2Login/authentication 후처리기).
+    testImplementation 'org.springframework.security:spring-security-test'
 
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }

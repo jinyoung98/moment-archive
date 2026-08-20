@@ -448,6 +448,7 @@ archive-frontend/
 | A17 | 스토리지를 AWS SDK v2 로 접근하고 MinIO 를 "S3 의 한 구현" 으로만 취급 | 실제 S3 로 옮길 때 바뀌는 것이 엔드포인트와 자격뿐이다. 업로드에 `x-amz-checksum-sha256` 을 실어 **서버가 수신 바이트를 직접 대조하게** 만든 것도 규격 기능이라 따라왔다 — 손상된 원본이 저장되는 경로가 닫힌다 (I1) | MinIO 자체 SDK(`io.minio`) — API 는 더 단순하지만 스토리지를 바꿀 때 클라이언트 코드를 다시 씀. MinIO 는 목적이 아니라 로컬에서 S3 를 흉내내는 수단이다 |
 | A18 | PROBE 의 EXIF 추출을 `metadata-extractor`(순수 Java)로 | 네이티브 의존이 없어 libvips 없는 개발 노트북·CI 에서도 그대로 돈다. `media` 3계층 검증 전략(design.md §10)에서 PROBE 를 "컨테이너 없는 단위 테스트" 층에 놓을 수 있게 됨 | ffprobe/exiftool CLI — 서브프로세스라 검증 환경마다 바이너리가 필요. 사진 EXIF 에는 과함 (영상 ffprobe 는 W2 별도) |
 | A19 | THUMB 의 libvips 를 `Thumbnailer` 인터페이스 뒤 **CLI 서브프로세스**(`vips thumbnail`)로 | `ObjectStorage`↔`S3ObjectStorage` 와 같은 seam. 클래스패스에 네이티브 심볼이 붙지 않아 libvips 없는 환경에서도 앱 컨텍스트가 뜨고 THUMB 만 `isAvailable()` 로 스킵된다. libvips 부재는 배포 문제이지 미디어 문제가 아니므로 자산을 FAILED 로 만들지 않고 PROBED 에 남긴다 (P5) | JNI/FFM 바인딩(`vips-ffm` 등) — 성숙도가 낮고 네이티브 링크 실패가 컨텍스트 기동 전체를 막음 / 순수 Java(Thumbnailator·ImageIO) — libvips 스택 결정과 HEIC 지원(§13)을 포기 |
+| A20 | 인증을 **소셜 로그인(OIDC) + httpOnly 쿠키 세션**으로, 신원은 `(provider, provider_uid)` | 자체 회원가입은 최소 1주에 포트폴리오 가치 0 (§9.2). 쿠키 세션은 서버가 무효화를 통제 — 로그아웃·강제 만료가 즉시 먹는다. `provider` 를 키에 넣어 Google 로 시작하고 Kakao 를 표 변경 없이 추가. 공개 배포되는 개인 서비스라 **이메일 허용목록**으로 임의 가입을 차단(목록은 여러 명 가능, 비면 개발용 전체 허용) | JWT — 무효화하려면 결국 서버 상태(블랙리스트)가 필요해 쿠키 세션의 단순함이 사라짐, 개인 서비스에 stateless 확장성은 불필요 / Redis 세션 저장 — 도입 조건 미충족(§3.1), 인메모리로 충분하고 유지가 필요해지면 Spring Session JDBC 로 승격 |
 
 ---
 

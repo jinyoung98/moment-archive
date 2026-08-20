@@ -1,8 +1,12 @@
 package dev.jinyoung.archive.upload;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import static dev.jinyoung.archive.support.AuthTestSupport.archiveUser;
+import static dev.jinyoung.archive.support.AuthTestSupport.asUser;
 
 import java.awt.Color;
 import java.awt.Graphics2D;
@@ -24,6 +28,9 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import tools.jackson.databind.ObjectMapper;
 
+import dev.jinyoung.archive.auth.ArchiveUser;
+import dev.jinyoung.archive.auth.User;
+import dev.jinyoung.archive.auth.UserAccountService;
 import dev.jinyoung.archive.media.MediaAssetRepository;
 import dev.jinyoung.archive.media.MediaAssetStatus;
 import dev.jinyoung.archive.media.ObjectStorage;
@@ -53,13 +60,20 @@ class UploadControllerIntegrationTest extends IntegrationTest {
     @Autowired
     private ObjectStorage storage;
 
+    @Autowired
+    private UserAccountService userAccounts;
+
     private final ObjectMapper json = new ObjectMapper();
+
+    private ArchiveUser owner;
 
     @BeforeEach
     void 정리한다() {
         assets.deleteAll();     // media_derivatives 는 FK ON DELETE CASCADE 로 함께 삭제
         storage.listKeys(StorageKeys.ORIGINALS_PREFIX).forEach(storage::delete);
         storage.listKeys(StorageKeys.DERIVATIVES_PREFIX).forEach(storage::delete);
+        User user = userAccounts.findOrCreate("GOOGLE", "test-sub", "me@example.com", "나");
+        owner = archiveUser(user.id(), user.email());
     }
 
     @Test
@@ -111,14 +125,15 @@ class UploadControllerIntegrationTest extends IntegrationTest {
     void 지원하지_않는_형식은_400() throws Exception {
         MockMultipartFile file = new MockMultipartFile("file", "note.txt", "text/plain", "hello".getBytes());
 
-        mockMvc.perform(multipart(HttpMethod.PUT, "/media").file(file))
+        mockMvc.perform(multipart(HttpMethod.PUT, "/media").file(file).with(asUser(owner)).with(csrf()))
                 .andExpect(status().isBadRequest());
     }
 
     private UploadOriginalResponse upload(byte[] content, String filename, String contentType) throws Exception {
         MockMultipartFile file = new MockMultipartFile("file", filename, contentType, content);
 
-        MvcResult result = mockMvc.perform(multipart(HttpMethod.PUT, "/media").file(file))
+        MvcResult result = mockMvc.perform(
+                        multipart(HttpMethod.PUT, "/media").file(file).with(asUser(owner)).with(csrf()))
                 .andExpect(status().isOk())
                 .andReturn();
 

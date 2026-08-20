@@ -21,6 +21,7 @@
 | `./gradlew clean test` — Postgres+MinIO, 테스트 20건 | **10초** | 2026-08-11 |
 | `./gradlew test` — Postgres+MinIO, 테스트 23건 | **58초** | 2026-08-13 |
 | `./gradlew test` — Postgres+MinIO, 테스트 29건(THUMB 2건 스킵) | **13초** | 2026-08-20 |
+| `./gradlew test` — Postgres+MinIO, 테스트 36건(vips 설치·THUMB 포함) | **14초** | 2026-08-20 |
 
 > **테스트가 5배로 늘었는데 시간이 줄어든 것을 개선으로 읽지 말 것.** 조건이 다르다 —
 > 서버에 이미지가 캐시된 상태였고, Gradle 데몬도 떠 있었다. 8/6 의 23초에는 이미지 pull 이
@@ -28,6 +29,32 @@
 > 아직 따로 재지 않았다. 성능 기준선은 여기서 재지 않는다 ([infra.md](../infra.md) §5).
 > 8/13 의 58초도 같은 이유로 앞선 값들과 비교하지 말 것 — 직전에 서버 `docker` 를
 > 재시작해 이미지 캐시가 비어 있었다 (아래 항목 참조).
+
+---
+
+## 2026-08-20 — 인증 (구글 OIDC + 쿠키 세션)
+
+W1 마지막 백엔드 조각. `DevUserProvider`(고정 사용자)를 실제 소셜 로그인으로 대체. 정본은
+ADR A20, interview-notes §1.
+
+- **JWT 가 아니라 쿠키 세션.** JWT 는 무효화하려면 결국 서버 상태(블랙리스트)가 필요해
+  stateless 이점이 사라진다. 개인 서비스라 다중 서버 확장도 없어서 서버가 무효화를 직접
+  통제하는 쿠키 세션이 그냥 낫다. 세션은 인메모리 — 유지 필요 시 Redis 아닌 Spring Session JDBC
+- **신원은 `(provider, provider_uid)`.** provider 를 키에 넣어 Kakao(예정)를 표 변경 없이 추가.
+  로그인 시 find-or-create 로 내부 `users.id` 확정 → 세션 주체 `ArchiveUser` 에 실어 둠.
+  컨트롤러는 구글 sub 이 아니라 그 내부 id 만 봄 (`CurrentUser.requireUserId()`)
+- **공개 배포 대비 이메일 허용목록.** OAuth 성공해도 목록 밖이면 거부. 목록은 여러 명 가능,
+  비면 전체 허용 + 시작 경고. 허용 판정을 네트워크와 분리(`ArchiveOidcUserService.process`)해
+  합성 사용자로 단위 테스트 — libvips 를 CLI 뒤로 뺀 것과 같은 발상
+- **미인증은 302 아닌 401**(SPA 소비 API), **CSRF 유지**(더블서밋 쿠키, XSRF-TOKEN 만 httpOnly off)
+- **실제 구글 왕복은 미검증** — 자격이 있어야 한다. 테스트는 `spring-security-test` 로 인증 주체를
+  주입하고, oauth2Login 컨텍스트 기동용 더미 자격만 IntegrationTest 가 넣는다. 브라우저 1회
+  수동 확인은 프론트 붙일 때
+- 함정: CSRF 켠 상태에서 미인증 PUT 은 CSRF(403)가 인증(401)보다 먼저 걸린다. "미인증=401" 을
+  드러내려면 테스트에서 `csrf()` 는 통과시키고 인증만 빼야 함
+
+> 정본: ADR A20([design.md](../design.md) §11), [interview-notes.md](../interview-notes.md) §1,
+> `auth/` 패키지와 `AuthIntegrationTest.java` 주석.
 
 ---
 

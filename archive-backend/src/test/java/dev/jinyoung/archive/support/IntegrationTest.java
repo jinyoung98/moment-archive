@@ -68,6 +68,16 @@ public abstract class IntegrationTest {
     }
 
     /**
+     * 더미 구글 자격. oauth2Login 은 ClientRegistrationRepository 가 있어야 컨텍스트가 뜬다.
+     * 실제 구글 왕복은 테스트에서 하지 않는다 — 인증된 주체를 직접 주입한다(AuthTestSupport).
+     */
+    @DynamicPropertySource
+    static void oauthProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.security.oauth2.client.registration.google.client-id", () -> "test-client-id");
+        registry.add("spring.security.oauth2.client.registration.google.client-secret", () -> "test-client-secret");
+    }
+
+    /**
      * 운영에서 버킷을 만드는 것은 애플리케이션이 아니라 {@code minio-init} 컨테이너다
      * (docs/infra.md §2.5). 그 역할을 여기서 대신한다 — 버킷 생성을 프로덕션 코드에 넣으면
      * 테스트만을 위한 권한과 경로가 운영에 남는다.

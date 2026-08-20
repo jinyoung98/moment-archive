@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.jdbc.core.JdbcAggregateOperations;
 
-import dev.jinyoung.archive.auth.DevUserProvider;
+import dev.jinyoung.archive.auth.UserAccountService;
 import dev.jinyoung.archive.media.ContentAddressedStore;
 import dev.jinyoung.archive.media.DerivativeRecipe;
 import dev.jinyoung.archive.media.MediaAsset;
@@ -59,7 +59,7 @@ class MediaProcessingIntegrationTest extends IntegrationTest {
     @Autowired
     private Thumbnailer thumbnailer;
     @Autowired
-    private DevUserProvider ownerProvider;
+    private UserAccountService userAccounts;
     @Autowired
     private JdbcAggregateOperations jdbcOps;
     @Autowired
@@ -121,7 +121,7 @@ class MediaProcessingIntegrationTest extends IntegrationTest {
         try {
             writeJpeg(temp, width, height);
             StoredOriginal stored = store.storeOriginal(temp, "image/jpeg");
-            UUID ownerId = ownerProvider.currentUserId();
+            UUID ownerId = userAccounts.findOrCreate("GOOGLE", "test-sub", "me@example.com", "나").id();
             MediaAsset ingested = MediaAsset.newlyIngested(
                     UUID.randomUUID(), ownerId, stored, "image/jpeg", MediaKind.PHOTO, clock.instant());
             return jdbcOps.insert(ingested);

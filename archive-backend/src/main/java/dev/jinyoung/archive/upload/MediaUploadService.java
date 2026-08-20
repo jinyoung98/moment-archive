@@ -11,7 +11,7 @@ import org.springframework.data.jdbc.core.JdbcAggregateOperations;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-import dev.jinyoung.archive.auth.DevUserProvider;
+import dev.jinyoung.archive.auth.CurrentUser;
 import dev.jinyoung.archive.media.ContentAddressedStore;
 import dev.jinyoung.archive.media.DerivativeRecipe;
 import dev.jinyoung.archive.media.MediaAsset;
@@ -38,7 +38,7 @@ public class MediaUploadService {
     private final MediaDerivativeRepository derivatives;
     private final MediaProcessingService processing;
     private final JdbcAggregateOperations jdbcOps;
-    private final DevUserProvider ownerProvider;
+    private final CurrentUser currentUser;
     private final Clock clock;
 
     public MediaUploadService(
@@ -47,21 +47,21 @@ public class MediaUploadService {
             MediaDerivativeRepository derivatives,
             MediaProcessingService processing,
             JdbcAggregateOperations jdbcOps,
-            DevUserProvider ownerProvider,
+            CurrentUser currentUser,
             Clock clock) {
         this.store = store;
         this.assets = assets;
         this.derivatives = derivatives;
         this.processing = processing;
         this.jdbcOps = jdbcOps;
-        this.ownerProvider = ownerProvider;
+        this.currentUser = currentUser;
         this.clock = clock;
     }
 
     public UploadOriginalResponse upload(MultipartFile file) throws IOException {
         String contentType = file.getContentType();
         MediaKind kind = MediaKind.fromMimeType(contentType);
-        UUID ownerId = ownerProvider.currentUserId();
+        UUID ownerId = currentUser.requireUserId();
 
         Path tempFile = Files.createTempFile("upload-original-", ".tmp");
         try {

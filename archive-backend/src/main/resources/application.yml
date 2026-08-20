@@ -22,6 +22,18 @@ spring:
       max-file-size: 512MB
       max-request-size: 512MB
 
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            # client-id/secret 은 Google Cloud Console 에서 발급. 커밋 금지 —
+            # application-local.yml 이나 환경변수로. 비어 있으면 기동이 실패한다(소셜 로그인
+            # 자체가 자격 없이는 불가). scope 만 여기 고정.
+            client-id: ${GOOGLE_CLIENT_ID:}
+            client-secret: ${GOOGLE_CLIENT_SECRET:}
+            scope: openid, email, profile
+
 server:
   port: 8080
 
@@ -35,3 +47,8 @@ archive:
     bucket: ${S3_BUCKET:archive}
     # MinIO 는 리전을 쓰지 않지만 SDK 가 서명 계산에 요구한다. 실제 S3 로 옮기면 여기가 바뀐다.
     region: ${S3_REGION:us-east-1}
+
+  auth:
+    # 로그인 허용 이메일(쉼표 구분). 비면 전체 허용(개발용) — 배포 전 반드시 채운다.
+    # 여러 명(가족·지인) 가능. 예: ARCHIVE_ALLOWED_EMAILS=a@x.com,b@y.com
+    allowed-emails: ${ARCHIVE_ALLOWED_EMAILS:}
