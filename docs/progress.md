@@ -11,23 +11,29 @@
 > 새 판단이 나오면 여기가 아니라 **ADR·interview-notes·코드 주석**으로 보낸다.
 > 세션 기록은 [journal/sessions.md](./journal/sessions.md) 에 쌓고 여기서는 읽지 않는다.
 
-- **최종 갱신**: 2026-08-20
-- **현재 단계**: W1 진행 중 — 하네스·스토리지·업로드·처리·인증 완료, 프론트만 남음
+- **최종 갱신**: 2026-08-21
+- **현재 단계**: W1 코드 완료 — 브라우저 E2E 수동 검증만 남음
 
 ---
 
 ## 지금 해야 할 일
 
-> **다음 첫 작업: 프론트.**
-> `archive-frontend/` 스캐폴딩(React+Vite+TS) → 로그인 → 파일 선택 → 업로드 → 결과(썸네일) 표시.
-> W1 완료 기준("브라우저에서 사진 1장 → 썸네일")을 채우려면 **파생물 바이트를 내려주는 조회
-> 경로**(`GET /media/{id}/thumbnail` 류)가 아직 없어 이때 함께 필요. OAuth 리다이렉트가 SPA
-> 오리진(Vite :5173)으로 돌아오는 배선(프록시·쿠키)도 여기서.
+> **다음 첫 작업: W1 브라우저 E2E 수동 검증.**
+> 코드는 다 붙었다(백엔드 테스트·프론트 빌드 통과). 남은 건 실제 브라우저에서 한 번
+> **로그인 → 사진 1장 → 썸네일**을 눈으로 확인하는 것 — bootRun + `npm run dev` + 구글 자격이
+> 있어야 돌아가는 수동 단계다. 절차는 아래 "실행 환경". 확인되면 W1 종료, W2(청크·큐·SSE·영상)로.
+>
+> **프론트 완료.** `archive-frontend/`(React+Vite+TS+TanStack Query). `/api/me` 401 게이트로
+> 로그인 유도 → 파일 선택 → `PUT /media`(CSRF 헤더) → 썸네일 표시. 스타일 없음(ADR A16).
+> 개발 프록시는 `changeOrigin:false` 단일 오리진(ADR A23) — **Google Console 리다이렉트 URI 에
+> `http://localhost:5173/login/oauth2/code/google` 추가 필요**.
+>
+> **썸네일 서빙 완료.** `GET /media/{id}/thumbnail` — assetId 기준, 소유 확인, storage_key 비노출,
+> 없으면 404. 판단은 ADR A21. SPA CSRF 배선(CsrfCookieFilter + 비-XOR)은 ADR A22.
 >
 > **인증 완료.** 구글 OIDC + httpOnly 쿠키 세션. 신원 `(provider, provider_uid)`, 로그인 시
-> find-or-create → 세션 주체(`ArchiveUser`)에 내부 `users.id`. `CurrentUser` 가 owner_id 출처
-> (`DevUserProvider` 삭제됨). 이메일 허용목록으로 임의 가입 차단. 미인증 401, CSRF 쿠키.
-> 판단은 ADR A20, interview-notes §1.
+> find-or-create → 세션 주체(`ArchiveUser`)에 내부 `users.id`. `CurrentUser` 가 owner_id 출처.
+> 이메일 허용목록으로 임의 가입 차단. 미인증 401, CSRF 쿠키. 판단은 ADR A20, interview-notes §1.
 >
 > **처리 완료.** `PROBE`(metadata-extractor) → `THUMB`(libvips CLI) 동기. `INGESTED → PROBED →
 > THUMBED`, 손상 파일은 `FAILED`. 판단은 ADR A18·A19, interview-notes §3.
@@ -38,10 +44,12 @@
 
 - [x] 하네스 — Testcontainers + `Clock` 주입, 통합 테스트 4건 통과
 - [x] 스토리지 — S3 추상화, 해시 기반 키, CAS 저장/조회. `I1`·`I2` 를 MinIO 위에서 검증
-- [x] 업로드 — 단일 파일 `PUT /media` (청크 없음). `media_assets` 행 생성/재사용, owner 는 임시 고정 사용자
+- [x] 업로드 — 단일 파일 `PUT /media` (청크 없음). `media_assets` 행 생성/재사용, owner 는 `CurrentUser`
 - [x] 처리 — `PROBE`(EXIF) + `THUMB`(libvips) **동기 실행**. 응답에 `thumbKey` 포함. THUMB 은 libvips 있는 환경에서만 실측(그 외 `assumeTrue` 스킵)
 - [x] 인증 — 구글 OIDC + 쿠키 세션 + 이메일 허용목록. `CurrentUser` 로 owner_id. **실제 구글 로그인 왕복 → `/api/me` 까지 브라우저로 검증 완료** (2026-08-20)
-- [ ] 프론트 — `archive-frontend/` 스캐폴딩, 파일 선택 + 결과 표시, 스타일 없음 (ADR A16). 썸네일 조회 엔드포인트도 함께
+- [x] 썸네일 서빙 — `GET /media/{id}/thumbnail`(assetId 기준, 소유 확인, webp). 통합 테스트 3건 통과(webp 바이트 실측 포함). ADR A21
+- [x] 프론트 — `archive-frontend/`, 파일 선택 + 결과 표시, 스타일 없음. **빌드·타입체크 통과**. ADR A16
+- [ ] **W1 종료 게이트** — 브라우저에서 로그인→업로드→썸네일 1회 수동 확인 (아래 실행 절차)
 
 ### 실행 환경
 
@@ -84,6 +92,15 @@ archive:
 `./gradlew :archive-backend:bootRun` 은 테스트와 달리 **상시 스택(Postgres 5434·MinIO 9000)에
 노트북이 직접 닿아야** 한다 — 서버 `.env` 의 `BIND_HOST=<사설 IP>` 로 열고(infra.md §3.1),
 `nc -z 192.168.133.221 5434` 로 확인. THUMB 실측엔 libvips 도 필요.
+
+**W1 브라우저 E2E 절차** (프론트 붙인 뒤 남은 수동 검증):
+
+1. Google Console OAuth 클라이언트에 리다이렉트 URI **`http://localhost:5173/login/oauth2/code/google`** 추가 (프록시 단일 오리진, ADR A23)
+2. 백엔드: `./gradlew :archive-backend:bootRun` (상시 스택 도달 + 구글 자격 필요)
+3. 프론트: `cd archive-frontend && npm install && npm run dev` → `http://localhost:5173`
+4. 브라우저에서 "구글로 로그인" → 사진 1장 선택 → 썸네일이 뜨면 W1 종료
+
+프론트 자체 검증(네트워크 불필요): `cd archive-frontend && npm run build` (tsc --noEmit + vite build).
 
 ---
 

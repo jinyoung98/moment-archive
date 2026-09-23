@@ -22,6 +22,7 @@
 | `./gradlew test` — Postgres+MinIO, 테스트 23건 | **58초** | 2026-08-13 |
 | `./gradlew test` — Postgres+MinIO, 테스트 29건(THUMB 2건 스킵) | **13초** | 2026-08-20 |
 | `./gradlew test` — Postgres+MinIO, 테스트 36건(vips 설치·THUMB 포함) | **14초** | 2026-08-20 |
+| 프론트 `npm run build` (tsc --noEmit + vite build), 78 모듈 | **~0.4초**(빌드만) | 2026-08-21 |
 
 > **테스트가 5배로 늘었는데 시간이 줄어든 것을 개선으로 읽지 말 것.** 조건이 다르다 —
 > 서버에 이미지가 캐시된 상태였고, Gradle 데몬도 떠 있었다. 8/6 의 23초에는 이미지 pull 이
@@ -29,6 +30,34 @@
 > 아직 따로 재지 않았다. 성능 기준선은 여기서 재지 않는다 ([infra.md](../infra.md) §5).
 > 8/13 의 58초도 같은 이유로 앞선 값들과 비교하지 말 것 — 직전에 서버 `docker` 를
 > 재시작해 이미지 캐시가 비어 있었다 (아래 항목 참조).
+
+---
+
+## 2026-08-21 — 프론트 (W1 수직 슬라이스 끝단) + 썸네일 서빙
+
+W1 마지막 조각. `archive-frontend/`(React+Vite+TS+TanStack Query)를 세우고, 프론트가 필요로 하는
+백엔드 구멍 둘을 같이 메웠다. 백엔드 테스트 전건 통과(썸네일 webp 바이트 실측 포함), 프론트
+빌드·타입체크 통과. **브라우저 E2E 1회 수동 확인은 남겨 둠** — 구글 자격 + 상시 스택이 있어야 도는 단계.
+
+- **썸네일은 assetId 로 서빙**(`GET /media/{id}/thumbnail`), storage_key 는 URL 에 안 내보낸다.
+  내부 스토리지 좌표라 바뀔 수 있고 열거되면 안 됨. 남의 자산·없는 자산을 같은 404 로 응답 —
+  403 은 "있긴 하다"를 흘린다. 소유 확인을 붙일 자리가 assetId 경로였다 (ADR A21)
+- **SPA CSRF 는 쿠키만 켜는 걸로 안 끝났다.** Spring Security 6 이 토큰을 지연 로딩해서 첫 로드에
+  `XSRF-TOKEN` 쿠키가 안 나가고 → 첫 업로드가 403. 매 요청 토큰을 읽어 쿠키를 강제하는
+  `CsrfCookieFilter` 를 넣고, XOR 핸들러(쿠키 원문≠헤더 값)를 비-XOR 로 바꿔야 SPA 가 쿠키를
+  그대로 되보낼 수 있다. 둘 다 레퍼런스 SPA 패턴 (ADR A22)
+- **개발 프록시 크로스오리진 쿠키 함정.** :8080 에 심긴 세션 쿠키는 :5173 요청에 안 붙는다.
+  Vite 프록시를 `changeOrigin:false` 로 둬 Host 를 :5173 로 보존 → Spring 이 redirect_uri·쿠키를
+  :5173 기준으로 만들고 OAuth 왕복 전체가 단일 오리진이 된다. 대가는 Google Console 에 :5173
+  리다이렉트 URI 하나 더 (ADR A23)
+- TanStack Query 는 W1 에선 `/api/me` 캐싱뿐이라 과해 보이지만, W2 의 SSE·폴링 이중 갱신이
+  이걸 고른 이유라 처음부터 그 위에 올렸다 (ADR A16). `retry:false` — 401 은 재시도해도 401
+- 함정: `HttpError` 를 client 에서 던지는데 App 이 media 에서 import 하려다 컴파일 실패. media 를
+  서버 접점 단일 창구로 두려고 거기서 되노출로 정리. TanStack v5 는 `isLoading` 이 아니라
+  `isPending` 로 분기해야 이후 `data` 가 non-undefined 로 좁혀진다
+
+> 정본: ADR A21·A22·A23([design.md](../design.md) §11), [interview-notes.md](../interview-notes.md) §1,
+> `MediaThumbnailController.java`·`SecurityConfig.java`·`vite.config.ts`·`api/` 주석.
 
 ---
 
