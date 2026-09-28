@@ -221,18 +221,20 @@ SKIPPED_DUPLICATE    PENDING
 ### 5.1 작업 획득
 
 ```sql
--- 트랜잭션
-SELECT * FROM processing_jobs
- WHERE state = 'QUEUED' AND lane = :lane AND run_after <= now()
- ORDER BY id LIMIT 1
- FOR UPDATE SKIP LOCKED;
-
 UPDATE processing_jobs
-   SET state = 'RUNNING', locked_by = :workerId, locked_at = now()
- WHERE id = :jobId;
+   SET state = 'RUNNING', locked_by = :lockToken, locked_at = :now
+ WHERE id = (SELECT id FROM processing_jobs
+              WHERE state = 'QUEUED' AND lane = :lane AND run_after <= :now
+              ORDER BY id LIMIT 1
+              FOR UPDATE SKIP LOCKED)
+RETURNING ...;
 ```
 
 `SKIP LOCKED`가 없으면 워커들이 같은 행에서 서로를 기다려 사실상 직렬화된다. 이 한 줄이 큐를 만든다.
+
+- **`:now` 는 주입된 `Clock` 값이다.** SQL `now()` 를 쓰지 않는다 — 백오프·lease 를 시계만 돌려 검증하려고. 대가(워커 간 시계 오차)와 방어는 §5.8
+- **`locked_by` 는 워커 ID 가 아니라 획득마다 새로 발급하는 잠금 토큰**(`{워커ID}#{순번}`)이다. 같은 프로세스의 두 스레드가 회수·재획득으로 같은 작업을 번갈아 잡아도, 먼저 잡았던 스레드의 뒤늦은 완료가 소유권 확인(§5.4)을 통과하지 못한다 (펜싱 토큰)
+- 획득은 자동 커밋 단일 문장. **처리(다운로드·libvips)는 트랜잭션 밖**에서 하고, 결과 반영만 짧은 트랜잭션으로 (§5.7). 처리 동안 커넥션·락을 잡지 않는다
 
 ### 5.2 하트비트
 
@@ -244,24 +246,27 @@ UPDATE processing_jobs
 **하트비트로 해결한다.** 워커가 처리 중 30초마다 `locked_at`을 갱신하면, 회수 기준을 2분으로 짧게 유지하면서도 긴 작업이 안전하다.
 
 ```java
-@Scheduled(fixedDelay = 30_000)
-void heartbeat() {
-    activeJobs.forEach(jobId -> jobRepository.touch(jobId, workerId));
-}
+// JobWorker — WorkerLoop 가 30초마다 호출
+active.forEach((jobId, token) -> queue.heartbeat(jobId, token, clock.instant()));
 ```
 
 ### 5.3 죽은 작업 회수
 
 ```sql
 UPDATE processing_jobs
-   SET state = 'QUEUED', locked_by = NULL, locked_at = NULL,
+   SET state = CASE WHEN attempt + 1 >= max_attempts THEN 'DEAD' ELSE 'QUEUED' END,
        attempt = attempt + 1,
+       run_after = :now, locked_by = NULL, locked_at = NULL,
        last_error = 'worker lease expired'
  WHERE state = 'RUNNING'
-   AND locked_at < now() - interval '2 minutes';
+   AND locked_at < :cutoff;          -- :cutoff = :now − lease(2분)
 ```
 
 `attempt`를 증가시키는 것이 중요하다. 특정 파일이 워커를 반복적으로 죽이는 경우(메모리 폭발을 유발하는 손상 영상 등) 무한 루프에 빠지지 않고 `max_attempts`에서 `DEAD`가 된다.
+
+- 실제 SQL 은 대상 행을 `ORDER BY id FOR UPDATE SKIP LOCKED` 서브쿼리로 고른다. 여러 프로세스의 회수기가 동시에 돌 때 잠금 순서가 엇갈려 교착하지 않게
+- **PROBE 가 여기서 `DEAD` 가 되면 같은 문장(CTE)에서 자산을 `FAILED` 로.** 메타 없는 자산은 쓸 수 없고, 안 그러면 살아 있는 작업 없이 `INGESTED` 에 영구 정지해 화면이 "처리 중"을 계속 보인다. 워커 쪽 DEAD 경로(재시도 소진·처리기 부재)도 같은 규칙. THUMB 의 DEAD 는 `PROBED` 유지 (P5)
+- 워커 프로세스가 `OutOfMemoryError` 로 스레드를 잃지 않게 루프는 `Throwable` 까지 삼킨다. 안 그러면 독성 파일 두 개에 사진 레인 스레드가 전부 조용히 멈추고 — 스케줄러는 예외 난 반복 작업을 로그 없이 취소한다 — 이 `max_attempts` 방어도 레인이 먼저 죽어 작동하지 않는다
 
 ### 5.4 소유권 확인
 
@@ -269,8 +274,10 @@ UPDATE processing_jobs
 
 ```sql
 UPDATE processing_jobs SET state = 'DONE'
- WHERE id = :jobId AND locked_by = :workerId;   -- 0행이면 이미 뺏긴 것
+ WHERE id = :jobId AND locked_by = :lockToken AND state = 'RUNNING';  -- 0행이면 이미 뺏긴 것
 ```
+
+완료뿐 아니라 재시도 예약·DEAD 처리·하트비트까지 **상태를 바꾸는 모든 UPDATE 가 같은 조건**을 단다.
 
 0행이면 결과를 조용히 버린다. 모든 단계가 멱등이므로 중복 실행 자체는 무해하다.
 
@@ -278,15 +285,20 @@ UPDATE processing_jobs SET state = 'DONE'
 
 | 분류 | 예시 | 처리 |
 |---|---|---|
-| **일시적** | 스토리지 타임아웃, 연결 끊김, OOM | 지수 백오프 재시도 |
-| **영구적** | 손상 파일, 미지원 코덱, 해시 불일치 | 즉시 `DEAD` |
-| **불명** | 예상 못 한 예외 | 재시도하되 `max_attempts` 낮게 |
+| **일시적** | 스토리지 오류, 연결 끊김, libvips 타임아웃 | 지수 백오프 재시도 → 소진 시 `DEAD` |
+| **영구적 (미디어)** | 손상 파일, 미지원 코덱, 해시 불일치 | 즉시 `DEAD` + 자산 `FAILED` |
+| **영구적 (환경)** | libvips 미설치, 처리기 없는 단계 | 즉시 `DEAD`, 자산은 그대로 (P5 — 배포 문제지 미디어 문제 아님) |
+| **불명** | 예상 못 한 예외 | 일시적과 같이 재시도 |
+| **프로세스 사망** | OOM, `SIGKILL` | 작업이 `RUNNING` 에 남음 → lease 회수 (§5.3) |
 
 ```java
-catch (StorageTimeoutException | IOException e) {
-    retryWithBackoff(job, e);
-} catch (CorruptedMediaException | UnsupportedCodecException | HashMismatchException e) {
-    markDead(job, e);
+// JobWorker.process
+} catch (UnreadableMediaException e) {      // 영구(미디어)
+    markDead + asset FAILED
+} catch (ToolUnavailableException e) {      // 영구(환경)
+    markDead
+} catch (RuntimeException e) {              // 일시적·불명
+    retryLater(backoff.delay(job.attempt()))
 }
 ```
 
@@ -308,9 +320,9 @@ catch (StorageTimeoutException | IOException e) {
 작업 50개가 동시에 실패하면 백오프가 같아 재시도도 동시에 몰린다. 지수적으로 늘려도 몰림 자체는 해소되지 않는다.
 
 ```java
-long base  = 1000L * (long) Math.pow(4, attempt);        // 1s, 4s, 16s, 64s, 256s
-long delay = ThreadLocalRandom.current().nextLong(base); // full jitter
-job.setRunAfter(now().plusMillis(delay));
+// Backoff — 난수원은 생성자 주입 (테스트는 시드 고정)
+long cap = 1000L * 4^attempt;                // 1s, 4s, 16s, 64s, 256s
+return Duration.ofMillis(random.nextLong(cap)); // full jitter
 ```
 
 `random(0, base)`로 구간 전체에 흩뿌린다(full jitter). 이것을 넣지 않으면 부하 상황에서 시스템이 주기적으로 맥박치듯 뛴다.
@@ -318,17 +330,39 @@ job.setRunAfter(now().plusMillis(delay));
 ### 5.7 단계 연쇄
 
 ```java
-@Transactional
-void complete(Job job, ProbeResult result) {
-    assetRepository.updateMetadata(job.assetId(), result);
-    assetRepository.updateStatus(job.assetId(), PROBED);
-    jobRepository.markDone(job.id());
-    jobRepository.enqueue(job.assetId(), THUMB, job.lane());   // 다음 단계
-    notifier.notify("asset.probed", job.assetId());
-}
+// JobWorker.commit — 한 트랜잭션
+if (!queue.markDone(job.id(), lockToken)) return;            // 소유권 먼저. 잃었으면 결과 폐기
+asset = reload(assetId);                                      // 처리 전 스냅샷이 아니라 최신 행
+update(asset.probed(...).withStatus(status.advanceTo(PROBED))); // 상태는 전진만
+queue.enqueue(assetId, THUMB, lane, ...);                     // 다음 단계. 살아 있는 작업 있으면 무시
+// notifier.notify("asset.probed", assetId);                  // SSE 도입 시 (§7)
 ```
 
 이 트랜잭션이 깨지면 전부 롤백되고, 작업은 `RUNNING`에 남았다가 lease 만료로 회수된다. **"메타는 저장됐는데 다음 작업이 등록되지 않음" 같은 상태가 존재할 수 없다.** 메시지 브로커를 쓰지 않은 판단(ADR A1)이 여기서 값을 한다.
+
+업로드도 같은 원칙이다. 자산 행 생성과 PROBE 등록이 한 트랜잭션이라 "자산은 있는데 처리 작업이 없음"이 불가능하다.
+
+### 5.8 시계 — `:now` 와 워커 간 오차
+
+큐의 모든 시각은 각 워커의 주입된 `Clock` 에서 온다 (ADR A24). 워커 A 가 자기 시계로 하트비트를 쓰고,
+회수자 B 가 자기 시계로 "2분 넘었나"를 본다. B 가 A 보다 Δ 빠르면 작업이 Δ 만큼 늙어 보인다.
+
+| Δ | 결과 |
+|---|---|
+| 획득 `run_after` 에서 | 백오프가 Δ 만큼 앞당겨지거나 늦어짐. 원래 지터로 흩뿌린 값이라 무해 |
+| 회수자가 느림 | 죽은 작업이 Δ 만큼 늦게 회수. 무해 |
+| 회수자가 빠르고 Δ > lease − heartbeat (= 90초) | **살아 있는 작업을 뺏음.** 중복 실행 자체는 멱등이라 무해하지만 매번 `attempt` 가 올라 긴 트랜스코딩이 멀쩡히 `DEAD` — 에러 없이 조용히 |
+
+방어는 "조용한 오작동 → 시끄러운 실패":
+
+1. **예산을 설정으로 강제** — `lease > heartbeat + 2·maxClockSkew` 가 아니면 `WorkerProperties` 생성 실패. 2배인 이유: 각 워커는 DB 대비 ±`maxClockSkew` 만 보장되므로 두 워커 사이는 최대 2배 (기본 120 > 30 + 60)
+2. **기동 시 검사** — 앱 `Clock` 과 DB `clock_timestamp()` 를 비교해 `maxClockSkew`(30초) 초과면 워커 기동 거부 (`ClockSkewGuard`). DB 를 모든 워커의 공통 기준점으로 씀
+3. **주기 검사** — 5분마다 재측정, 초과 시 경고 (도는 작업은 끊지 않음)
+
+api 전용 인스턴스는 검사하지 않는다. `enqueue` 의 `run_after` 를 자기 시계로 쓰지만, 어긋나도 처리 시작이 Δ 만큼 늦어질 뿐 회수 오작동은 아니다.
+
+단일 서버 배포에선 api·worker 가 같은 시계라 Δ = 0 이고, NTP 가 도는 다중 서버도 ms 단위다. 막으려는 건
+NTP 가 꺼진 VM·컨테이너 같은 드문 경우 — 드물지만 일어나면 데이터 상태를 조용히 망가뜨리는 종류.
 
 ---
 
@@ -611,7 +645,7 @@ EXIF 없는 스크린샷, 메신저로 받은 사진 등. 우선순위는 `EXIF 
 | 청크 수신 중 서버 재시작 | 진행 중 청크만 유실 | 클라이언트 타임아웃 후 재전송 |
 | 해시 불일치 | 자산 `FAILED` | 재시도 안 함. "파일 손상" 표시 |
 | 트랜스코딩 중 워커 `SIGKILL` | `RUNNING` 잔류 | 2분 후 lease 만료 → 회수 → 체크포인트부터 재개 |
-| 스토리지 쓰기 실패 | 작업 `FAILED` | 지수 백오프 재시도 |
+| 스토리지 쓰기 실패 | 작업 `QUEUED`(미래 `run_after`) | 지수 백오프 재시도 |
 | 미지원 코덱 | 작업 `DEAD` | 재시도 안 함. 원본 보존, 재생 불가 표시 |
 | 디스크 풀 | 모든 `DERIVE` 실패 | 백오프로 계속 재시도 (사람이 조치할 때까지) |
 | 블록 생성 실패 | 트랜잭션 롤백 | `blocks_created_at`이 NULL이므로 스케줄러가 재시도 |
@@ -662,5 +696,7 @@ if (existing.isPresent()) {
 - [ ] 동시 업로드 개수 실측 (3개가 적절한가)
 - [ ] 해싱 Worker 개수 실측
 - [ ] lease 만료 기준 2분 / 하트비트 30초의 적정성
+- [ ] 하트비트·회수·시계 검사가 스케줄러 스레드 1개를 공유 — 실제 하트비트 간격이 설정보다 길어질 수 있음. 영상 레인 붙일 때 실측
+- [ ] THUMB 중복 실행 시 패자가 소유권 확인 전에 같은 키에 덮어씀. 워커마다 libvips 버전이 다르면 저장 바이트와 행의 `content_hash` 가 어긋날 수 있음 (같은 버전이면 결정론이라 무해, I3). 다중 워커 배포 전 검토
 - [ ] `beforeunload` 경고 문구
 - [ ] 블록 자동 생성과 자동저장 충돌의 UX 다듬기 (§8.3)

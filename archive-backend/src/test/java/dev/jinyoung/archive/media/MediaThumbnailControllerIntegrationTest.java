@@ -32,12 +32,14 @@ import tools.jackson.databind.ObjectMapper;
 import dev.jinyoung.archive.auth.ArchiveUser;
 import dev.jinyoung.archive.auth.User;
 import dev.jinyoung.archive.auth.UserAccountService;
+import dev.jinyoung.archive.processing.JobWorker;
+import dev.jinyoung.archive.processing.job.Lane;
 import dev.jinyoung.archive.processing.thumb.Thumbnailer;
 import dev.jinyoung.archive.support.IntegrationTest;
 import dev.jinyoung.archive.upload.UploadOriginalResponse;
 
 /**
- * GET /media/{id}/thumbnail 서빙 검증. 업로드로 실제 파생물을 만든 뒤 그 바이트를 되받는다.
+ * GET /media/{id}/thumbnail 서빙 검증. 업로드 + 워커 drain 으로 실제 파생물을 만든 뒤 그 바이트를 되받는다.
  *
  * THUMB 바이트 단정은 libvips 게이트({@code assumeTrue}) — 없으면 THUMBED 에 못 가 파생물이 없고,
  * 그때 서빙 결과는 404 다(그 경로는 libvips 무관하게 검증 가능). 소유·부재 404 는 항상 검증한다.
@@ -55,6 +57,8 @@ class MediaThumbnailControllerIntegrationTest extends IntegrationTest {
     private UserAccountService userAccounts;
     @Autowired
     private Thumbnailer thumbnailer;
+    @Autowired
+    private JobWorker worker;
 
     private final ObjectMapper json = new ObjectMapper();
 
@@ -75,6 +79,7 @@ class MediaThumbnailControllerIntegrationTest extends IntegrationTest {
         assumeTrue(thumbnailer.isAvailable(), "libvips 미설치 — 썸네일 바이트 서빙 스킵");
 
         UUID assetId = upload(jpeg(800, 600));
+        worker.drain(Lane.PHOTO);   // 처리는 비동기 — 워커를 직접 돌려 THUMBED 까지
 
         MvcResult result = mockMvc.perform(get("/media/{id}/thumbnail", assetId).with(asUser(owner)))
                 .andExpect(status().isOk())
@@ -84,6 +89,15 @@ class MediaThumbnailControllerIntegrationTest extends IntegrationTest {
         byte[] body = result.getResponse().getContentAsByteArray();
         assertThat(body).isNotEmpty();
         assertThat(body.length).isEqualTo((int) result.getResponse().getContentLengthLong());
+    }
+
+    @Test
+    @DisplayName("처리 전이면 썸네일은 404 — 프론트는 플레이스홀더 유지")
+    void 처리_전은_404() throws Exception {
+        UUID assetId = upload(jpeg(320, 240));   // drain 안 함 → INGESTED
+
+        mockMvc.perform(get("/media/{id}/thumbnail", assetId).with(asUser(owner)))
+                .andExpect(status().isNotFound());
     }
 
     @Test

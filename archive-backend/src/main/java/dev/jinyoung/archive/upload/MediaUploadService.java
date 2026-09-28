@@ -4,11 +4,11 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.UUID;
 
-import org.springframework.dao.DuplicateKeyException;
-import org.springframework.data.jdbc.core.JdbcAggregateOperations;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import dev.jinyoung.archive.auth.CurrentUser;
@@ -16,17 +16,20 @@ import dev.jinyoung.archive.media.ContentAddressedStore;
 import dev.jinyoung.archive.media.DerivativeRecipe;
 import dev.jinyoung.archive.media.MediaAsset;
 import dev.jinyoung.archive.media.MediaAssetRepository;
-import dev.jinyoung.archive.media.MediaAssetStatus;
 import dev.jinyoung.archive.media.MediaDerivativeRepository;
 import dev.jinyoung.archive.media.MediaKind;
 import dev.jinyoung.archive.media.StoredOriginal;
-import dev.jinyoung.archive.processing.MediaProcessingService;
+import dev.jinyoung.archive.processing.job.JobQueue;
+import dev.jinyoung.archive.processing.job.Lane;
+import dev.jinyoung.archive.processing.job.Stage;
+import dev.jinyoung.archive.processing.job.WorkerProperties;
 
 /**
- * W1 단일 파일 업로드. 청크·세션 없음 (pipeline.md 는 W2 이후 프로토콜).
+ * 단일 파일 업로드. 청크·세션 없음 — 세션 프로토콜(pipeline.md §2)은 W2 다음 단계.
  *
  * 스토리지 계층(media 패키지)은 DB 를 모르는 채로 끝남 — 자산 행 기록은 여기서 처음 등장.
- * 처리(PROBE/THUMB)는 W1 동기 실행이라 업로드 요청 안에서 바로 돈다 (roadmap.md §2).
+ * 처리는 하지 않음. 새 자산이면 PROBE 작업만 <b>같은 트랜잭션</b>에서 등록하고 즉시 응답 —
+ * "자산은 있는데 처리 작업이 없음" 상태가 존재 불가. 결과는 워커가 뒤에서 (pipeline.md §5).
  */
 @Service
 public class MediaUploadService {
@@ -36,8 +39,9 @@ public class MediaUploadService {
     private final ContentAddressedStore store;
     private final MediaAssetRepository assets;
     private final MediaDerivativeRepository derivatives;
-    private final MediaProcessingService processing;
-    private final JdbcAggregateOperations jdbcOps;
+    private final JobQueue jobs;
+    private final WorkerProperties workerProperties;
+    private final TransactionTemplate tx;
     private final CurrentUser currentUser;
     private final Clock clock;
 
@@ -45,15 +49,17 @@ public class MediaUploadService {
             ContentAddressedStore store,
             MediaAssetRepository assets,
             MediaDerivativeRepository derivatives,
-            MediaProcessingService processing,
-            JdbcAggregateOperations jdbcOps,
+            JobQueue jobs,
+            WorkerProperties workerProperties,
+            TransactionTemplate tx,
             CurrentUser currentUser,
             Clock clock) {
         this.store = store;
         this.assets = assets;
         this.derivatives = derivatives;
-        this.processing = processing;
-        this.jdbcOps = jdbcOps;
+        this.jobs = jobs;
+        this.workerProperties = workerProperties;
+        this.tx = tx;
         this.currentUser = currentUser;
         this.clock = clock;
     }
@@ -66,21 +72,14 @@ public class MediaUploadService {
         Path tempFile = Files.createTempFile("upload-original-", ".tmp");
         try {
             file.transferTo(tempFile);
+            // 원본 저장은 트랜잭션 밖. 스토리지 쓰기 동안 커넥션을 잡지 않음 — CAS 라 재시도 안전 (I1).
             StoredOriginal stored = store.storeOriginal(tempFile, contentType);
-            Resolved resolved = findOrCreateAsset(ownerId, stored, contentType, kind);
-            MediaAsset asset = maybeProcess(resolved.asset());
+            Resolved resolved = tx.execute(s -> findOrCreateAsset(ownerId, stored, contentType, kind));
+            MediaAsset asset = resolved.asset();
             return new UploadOriginalResponse(asset.id(), asset.status(), resolved.reused(), thumbKeyOf(asset));
         } finally {
             Files.deleteIfExists(tempFile);
         }
-    }
-
-    /** 새 자산은 처리, 이미 처리된 중복은 건너뜀 (중복은 전송도 처리도 없음, pipeline.md §3). */
-    private MediaAsset maybeProcess(MediaAsset asset) {
-        if (asset.status() == MediaAssetStatus.INGESTED) {
-            return processing.process(asset);
-        }
-        return asset;
     }
 
     private String thumbKeyOf(MediaAsset asset) {
@@ -90,22 +89,27 @@ public class MediaUploadService {
                 .orElse(null);
     }
 
+    /**
+     * 트랜잭션 안. 새 자산이면 PROBE 등록까지. 이미 있으면(중복·동시 업로드 경합) 기존 행 재사용 —
+     * 중복은 전송도 처리도 없음 (pipeline.md §2). FAILED 자산 재처리는 세션 API 의 해시 선조회에서.
+     */
     private Resolved findOrCreateAsset(UUID ownerId, StoredOriginal stored, String contentType, MediaKind kind) {
-        var existing = assets.findByOwnerIdAndContentHash(ownerId, stored.hash().hex());
+        String hash = stored.hash().hex();
+        var existing = assets.findByOwnerIdAndContentHash(ownerId, hash);
         if (existing.isPresent()) {
             return new Resolved(existing.get(), true);
         }
 
-        MediaAsset toInsert = MediaAsset.newlyIngested(
-                UUID.randomUUID(), ownerId, stored, contentType, kind, clock.instant());
-        try {
-            return new Resolved(jdbcOps.insert(toInsert), false);
-        } catch (DuplicateKeyException e) {
-            // 같은 사용자가 같은 파일을 동시에 두 번 올린 경합. UNIQUE(owner_id, content_hash)
-            // 충돌은 에러가 아닌 정상 경로 (pipeline.md §10.1).
-            MediaAsset asset = assets.findByOwnerIdAndContentHash(ownerId, stored.hash().hex()).orElseThrow(() -> e);
-            return new Resolved(asset, true);
+        UUID id = UUID.randomUUID();
+        Instant now = clock.instant();
+        int inserted = assets.insertIngestedIfAbsent(
+                id, ownerId, hash, stored.byteSize(), contentType, kind.name(), stored.storageKey(), now);
+        if (inserted == 0) {
+            // 같은 사용자가 같은 파일을 동시에 두 번 올린 경합. 에러 아닌 정상 경로 (§10.1).
+            return new Resolved(assets.findByOwnerIdAndContentHash(ownerId, hash).orElseThrow(), true);
         }
+        jobs.enqueue(id, Stage.PROBE, Lane.of(kind), workerProperties.maxAttempts(), now);
+        return new Resolved(assets.findById(id).orElseThrow(), false);
     }
 
     /** 자산 행 + 이미 있던 것인지 여부. */

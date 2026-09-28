@@ -23,6 +23,7 @@
 | `./gradlew test` — Postgres+MinIO, 테스트 29건(THUMB 2건 스킵) | **13초** | 2026-08-20 |
 | `./gradlew test` — Postgres+MinIO, 테스트 36건(vips 설치·THUMB 포함) | **14초** | 2026-08-20 |
 | 프론트 `npm run build` (tsc --noEmit + vite build), 78 모듈 | **~0.4초**(빌드만) | 2026-08-21 |
+| `./gradlew test` — Postgres+MinIO, 테스트 65건(큐·워커 포함, vips 설치) | **22초** | 2026-09-28 |
 
 > **테스트가 5배로 늘었는데 시간이 줄어든 것을 개선으로 읽지 말 것.** 조건이 다르다 —
 > 서버에 이미지가 캐시된 상태였고, Gradle 데몬도 떠 있었다. 8/6 의 23초에는 이미지 pull 이
@@ -30,6 +31,37 @@
 > 아직 따로 재지 않았다. 성능 기준선은 여기서 재지 않는다 ([infra.md](../infra.md) §5).
 > 8/13 의 58초도 같은 이유로 앞선 값들과 비교하지 말 것 — 직전에 서버 `docker` 를
 > 재시작해 이미지 캐시가 비어 있었다 (아래 항목 참조).
+
+---
+
+## 2026-09-28 — W2 ① 처리 작업 큐 + 워커
+
+W2 첫 조각. 동기 처리(`MediaProcessingService`)를 걷어내고 `processing_jobs` 큐 + `JobWorker` 로.
+업로드는 자산 행 + PROBE 등록을 한 트랜잭션에 넣고 즉시 응답(INGESTED). 프론트는 `GET /media/{id}`
+1초 폴링(SSE 전 임시). 테스트 65건 통과, `I9` 도입. **브라우저 확인은 아직** — 다음 bootRun 에서
+상시 스택 DB 에 V2 가 적용됨.
+
+- **W2 순서를 큐 먼저로.** 큐가 들어오면 업로드 응답이 "즉시, 결과는 나중"으로 바뀌어 나머지(세션·SSE·
+  영상)가 전부 작업 등록 하나로 붙음. 세션을 먼저 하면 동기 처리 위에 쌓았다 뜯게 됨
+- **`:now` vs DB `now()`** — 사용자와 논의. 테스트 가능성 때문에 `:now` 를 택하고, 대가인 워커 간 시계
+  오차는 "회수자 시계가 90초 넘게 빠르면 살아 있는 작업을 뺏어 attempt 를 올린다" 한 곳만 위험하다고
+  좁힘 → 예산 강제 + 기동 시 DB 시계 비교 (ADR A24)
+- 설계 중 발견: `locked_by = workerId` 는 같은 프로세스 두 스레드의 회수·재획득에서 소유권 확인을
+  통과해 버림 → 획득마다 잠금 토큰 (ADR A26, 펜싱 토큰)
+- 업로드의 `DuplicateKeyException` 잡기 방식은 트랜잭션 안에서 못 씀 — Postgres 가 오류 난 트랜잭션을
+  통째로 중단시켜 같은 트랜잭션의 작업 등록을 이어갈 수 없음 → `ON CONFLICT DO NOTHING`
+- **I9 스냅샷 테스트의 사각.** PROBE 재실행이 THUMB 을 다시 끌고 와 최종 상태가 복구되므로, 중간의
+  THUMBED→PROBED 역행을 못 잡음. 상태 전진 로직을 일부러 빼는 변이로 확인 — I9 통과, 새 테스트만 실패
+- **리뷰(code-reviewer)에서 HIGH 2건, 둘 다 WorkerLoop.** ① `RuntimeException` 만 잡아 OOM 이면
+  `scheduleWithFixedDelay` 가 drain 을 로그 없이 영구 취소 → 레인이 조용히 죽음. ② 종료 중에도 drain 이
+  백로그를 계속 claim → 배포마다 attempt 상승. `Throwable` 포획 + `stopping` 플래그로 수정
+- 리뷰 MEDIUM 반영: PROBE DEAD(재시도 소진·회수 소진·처리기 부재) → 자산 FAILED (안 그러면 작업 없이
+  INGESTED 정지), 상태 응답에 `processing`(THUMB DEAD 로 PROBED 정지와 처리 중을 구분), 자산 갱신을
+  `FOR UPDATE` 로(동시 커밋 역행), 시계 예산 2배(워커끼리는 ±오차 두 개), 워커 수준 펜싱 테스트 추가
+- 미반영(§11 미결로): 스케줄러 스레드 공유로 하트비트 지연, 다중 워커 libvips 버전 차이 시 파생물 해시 어긋남
+
+> 정본: ADR A24·A25·A26([design.md](../design.md) §11), [pipeline.md](../pipeline.md) §5(§5.8 신설),
+> [schema.md](../schema.md) §5.6, [interview-notes.md](../interview-notes.md) §3, `JobQueue`·`JobWorker`·`WorkerLoop` 주석.
 
 ---
 

@@ -33,11 +33,29 @@ export async function fetchMe(): Promise<Me> {
   return res.json();
 }
 
-/** 단일 파일 업로드 (W1 — 청크·세션 없음). multipart 필드명 'file'(백엔드 기대값). */
+/** 단일 파일 업로드 (청크·세션 없음). 처리 전 즉시 응답. multipart 필드명 'file'(백엔드 기대값). */
 export async function uploadMedia(file: File): Promise<UploadResult> {
   const form = new FormData();
   form.append('file', file);
   const res = await api('/media', { method: 'PUT', body: form });
+  return res.json();
+}
+
+export interface MediaStatus {
+  assetId: string;
+  status: MediaAssetStatus;
+  // 살아 있는 처리 작업 유무. false 인데 THUMBED 가 아니면 멈춘 것(libvips 부재 등).
+  processing: boolean;
+}
+
+/** 처리가 끝난(더 바뀌지 않을) 상태. */
+export function isSettled(status: MediaAssetStatus): boolean {
+  return status === 'THUMBED' || status === 'READY' || status === 'FAILED';
+}
+
+/** 자산 처리 상태. 처리는 워커가 비동기로 — 업로드 응답은 대개 INGESTED. */
+export async function fetchMediaStatus(assetId: string): Promise<MediaStatus> {
+  const res = await api(`/media/${assetId}`);
   return res.json();
 }
 

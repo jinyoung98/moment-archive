@@ -222,6 +222,8 @@ CREATE INDEX idx_upload_items_session ON upload_items (session_id, state);
 
 ### 5.6 `processing_jobs` — 처리 작업 큐
 
+> 구현: `V2__processing_jobs.sql`. 아래 DDL 과 같아야 한다.
+
 ```sql
 CREATE TABLE processing_jobs (
   id           bigserial PRIMARY KEY,
@@ -233,35 +235,56 @@ CREATE TABLE processing_jobs (
   lane         text NOT NULL,        -- 'PHOTO' | 'VIDEO'
                                      -- 워커 풀을 나누는 기준 (아래 설명)
 
-  state        text NOT NULL,        -- 'QUEUED' | 'RUNNING' | 'DONE'
-                                     -- | 'FAILED' 재시도 예정 | 'DEAD' 포기
-  attempt      int  NOT NULL DEFAULT 0,
+  state        text NOT NULL,        -- 'QUEUED' | 'RUNNING' | 'DONE' | 'DEAD' 포기
+                                     -- 재시도 대기는 별도 상태 없이 QUEUED + 미래 run_after
+  attempt      int  NOT NULL DEFAULT 0,   -- 실패(또는 lease 회수) 누적 횟수
   max_attempts int  NOT NULL DEFAULT 5,
 
   run_after    timestamptz NOT NULL DEFAULT now(),
                                      -- 이 시각 이후 실행. 실패 시 지수 백오프로 미룬다
-  locked_by    text,                 -- 작업을 잡은 워커 인스턴스 ID
-  locked_at    timestamptz,          -- 잡은 시각. 오래되면 죽은 워커로 보고 회수
+  locked_by    text,                 -- 획득마다 발급하는 잠금 토큰 ("{워커ID}#{순번}")
+  locked_at    timestamptz,          -- 잡은 시각. 하트비트가 갱신. 오래되면 회수
 
   checkpoint   jsonb,                -- 중간 진행 상태.
                                      -- 예: 영상 트랜스코딩 {"processed_sec": 84}
                                      -- 워커가 죽어도 여기서부터 재개
   last_error   text,
   created_at   timestamptz NOT NULL DEFAULT now()
+  -- + stage/lane/state CHECK 제약
 );
 
 CREATE INDEX idx_jobs_pickup ON processing_jobs (lane, state, run_after, id);
+
+-- 같은 자산·단계의 살아 있는 작업은 하나만. 중복 PROBE 가 THUMB 을 또 거는 경합을 흡수
+CREATE UNIQUE INDEX uq_jobs_active ON processing_jobs (asset_id, stage)
+  WHERE state IN ('QUEUED', 'RUNNING');
+
+-- lease 회수 스캔용
+CREATE INDEX idx_jobs_running ON processing_jobs (locked_at) WHERE state = 'RUNNING';
 ```
+
+**시각 컬럼은 애플리케이션이 넣는다.** `DEFAULT now()` 는 안전망이고, 큐 SQL 도 `now()` 대신 주입된
+`Clock` 값을 `:now` 로 받는다 (ADR A24). 백오프·lease 를 시계만 돌려 테스트하기 위해서다.
+
+**재시도용 `FAILED` 상태를 두지 않은 이유.** 초안은 `FAILED`(재시도 예정)를 따로 뒀지만, 그러면 획득
+쿼리가 두 상태를 봐야 하고 lease 회수(→ QUEUED)와 전이가 갈린다. 재시도 = "미래에 다시 실행할
+QUEUED" 로 통일하면 획득 조건이 `state = 'QUEUED' AND run_after <= :now` 하나로 끝난다.
 
 #### 워커의 작업 획득 쿼리
 
 ```sql
-SELECT * FROM processing_jobs
- WHERE state = 'QUEUED' AND lane = :lane AND run_after <= now()
- ORDER BY id
- LIMIT 1
- FOR UPDATE SKIP LOCKED;   -- 다른 워커가 잡은 행은 건너뛴다. 이것이 큐의 핵심
+UPDATE processing_jobs
+   SET state = 'RUNNING', locked_by = :lockToken, locked_at = :now
+ WHERE id = (
+        SELECT id FROM processing_jobs
+         WHERE state = 'QUEUED' AND lane = :lane AND run_after <= :now
+         ORDER BY id
+         LIMIT 1
+         FOR UPDATE SKIP LOCKED)   -- 다른 워커가 잡은 행은 건너뛴다. 이것이 큐의 핵심
+RETURNING ...;
 ```
+
+SELECT FOR UPDATE 와 UPDATE 를 서브쿼리 한 문장으로 묶어 자동 커밋 단일 문장이 된다.
 
 #### 단계별 실제 작업
 

@@ -11,20 +11,30 @@
 > 새 판단이 나오면 여기가 아니라 **ADR·interview-notes·코드 주석**으로 보낸다.
 > 세션 기록은 [journal/sessions.md](./journal/sessions.md) 에 쌓고 여기서는 읽지 않는다.
 
-- **최종 갱신**: 2026-09-23
-- **현재 단계**: **W1 종료** — W2(업로드와 파이프라인) 시작 전
+- **최종 갱신**: 2026-09-28
+- **현재 단계**: **W2 진행 중** — ① 큐+워커 완료, 다음 ② 업로드 세션
 
 ---
 
 ## 지금 해야 할 일
 
-> **다음 첫 작업: W2 착수 순서 정하기.**
-> 범위·완료 기준은 [roadmap.md](./roadmap.md) §2 W2 (청크 재개·해싱·중복 선조회·큐·워커·영상·SSE).
-> 도입 불변식 `I3`·`I4`·`I9`. 프로토콜·상태 머신은 [pipeline.md](./pipeline.md) §1~4, 큐·워커는 §5~6.
-> 가장 넘치기 쉬운 주 — 넘치면 영상 트랜스코딩을 W4 로 (roadmap 경고).
+> **다음 첫 작업: W2 ② 업로드 세션 (사진 경로).**
+> `upload_sessions`/`upload_items` 마이그레이션 → 세션 생성 → 해시 보고 → 중복 세 갈래
+> (READY 즉시 / 처리 중 대기 / FAILED 는 작업 재등록) → 단일 `PUT .../content` → PROBE 에서 해시
+> 재계산해 `VERIFIED`. 프로토콜·상태 머신은 [pipeline.md](./pipeline.md) §2~4, 스키마는 schema.md §5.5.
+> 도입 불변식 `I3`. 블록 자동 생성(§8)은 records 가 필요해 W3 — W2 세션은 "전 항목 종착"까지만.
 >
-> 지금 처리는 **요청 스레드에서 동기**(PROBE→THUMB). W2 의 핵심은 이걸 `processing_jobs` 큐 +
-> 별도 워커로 떼어내는 것 — 업로드 응답은 즉시, 썸네일은 SSE 로 뒤늦게.
+> **W2 순서** (넘치면 ⑤의 트랜스코딩을 W4 로, roadmap 경고): ① 큐+워커 ✅ → ② 업로드 세션 →
+> ③ SSE + 프론트 해싱(Web Worker)·진행률 → ④ 청크 멀티파트 + 재개(`I4`) → ⑤ 영상(ffprobe·포스터).
+> ③까지 끝나면 "사진 50장"은 완결.
+>
+> **① 브라우저 확인 남음** — bootRun 시 V2 마이그레이션이 상시 스택 DB 에 적용됨. 사진 올리면 "처리 중…" →
+> 1~2초 뒤 썸네일로 바뀌면 됨.
+>
+> **① 완료.** 업로드는 자산 행 + PROBE 작업만 한 트랜잭션에 넣고 즉시 응답(INGESTED), 처리는
+> `JobWorker`(SKIP LOCKED, 잠금 토큰, 하트비트·lease 회수, 백오프+지터). 프론트는 `GET /media/{id}`
+> 1초 폴링(SSE 전 임시). `I9` 테스트 고정. 판단은 ADR A24(`:now`+시계 오차 방어)·A25(같은 jar+설정)·
+> A26(펜싱 토큰), pipeline.md §5.8, interview-notes §3.
 
 ### W1 수직 슬라이스 — 완료 (2026-09-23)
 
@@ -75,6 +85,8 @@ archive:
 `./gradlew :archive-backend:bootRun` 은 테스트와 달리 **상시 스택(Postgres 5434·MinIO 9000)에
 노트북이 직접 닿아야** 한다 — 서버 `.env` 의 `BIND_HOST=<사설 IP>` 로 열고(infra.md §3.1),
 `nc -z 192.168.133.221 5434` 로 확인. THUMB 실측엔 libvips 도 필요.
+bootRun 은 워커 루프까지 한 프로세스에서 돈다(기본). 끄려면 `ARCHIVE_WORKER_ENABLED=false` — 그러면
+업로드는 INGESTED 에서 멈춤. 워커는 기동 시 앱-DB 시계 오차 30초 초과면 뜨지 않음 (ADR A24).
 
 **브라우저 E2E 절차** (로컬에서 앱 전체 띄우기):
 

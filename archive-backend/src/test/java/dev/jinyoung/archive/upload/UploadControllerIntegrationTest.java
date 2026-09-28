@@ -2,7 +2,9 @@ package dev.jinyoung.archive.upload;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import static dev.jinyoung.archive.support.AuthTestSupport.archiveUser;
@@ -13,6 +15,7 @@ import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.util.Random;
+import java.util.UUID;
 
 import javax.imageio.ImageIO;
 
@@ -35,16 +38,16 @@ import dev.jinyoung.archive.media.MediaAssetRepository;
 import dev.jinyoung.archive.media.MediaAssetStatus;
 import dev.jinyoung.archive.media.ObjectStorage;
 import dev.jinyoung.archive.media.StorageKeys;
+import dev.jinyoung.archive.processing.JobWorker;
+import dev.jinyoung.archive.processing.job.Lane;
 import dev.jinyoung.archive.support.IntegrationTest;
 
 /**
- * 단일 파일 업로드 W1 수직 슬라이스: PUT /media → CAS 저장 → media_assets 행 → 동기 처리.
+ * 단일 파일 업로드: PUT /media → CAS 저장 → media_assets 행 + PROBE 작업 등록 → 즉시 응답.
+ * 처리는 워커 몫 — 응답은 INGESTED, 결과는 {@code worker.drain()} 뒤 GET /media/{id} 로 확인.
  *
- * 처리가 요청 안에서 돌기 때문에(roadmap.md §2) 유효한 이미지 바이트가 필요하다 — 예전의
- * 랜덤 바이트는 PROBE 에서 손상으로 판정된다. 그래서 ImageIO 로 실제 JPEG 을 만든다.
- *
- * libvips 없는 환경에서는 THUMB 가 건너뛰어져 PROBED 에서 멈춘다 (VipsThumbnailer 참조).
- * 그래서 상태 단정은 PROBED 이상으로 느슨하게 둔다 — THUMB 바이트 검증은 별도 처리 테스트에서.
+ * PROBE 가 실제로 이미지를 읽으므로 유효한 JPEG 이 필요 (랜덤 바이트는 손상 판정). libvips 없는
+ * 환경에선 THUMB 작업이 DEAD 되고 PROBED 에 멈춤 — 상태 단정은 PROBED 이상으로 느슨하게.
  */
 @AutoConfigureMockMvc
 class UploadControllerIntegrationTest extends IntegrationTest {
@@ -63,6 +66,9 @@ class UploadControllerIntegrationTest extends IntegrationTest {
     @Autowired
     private UserAccountService userAccounts;
 
+    @Autowired
+    private JobWorker worker;
+
     private final ObjectMapper json = new ObjectMapper();
 
     private ArchiveUser owner;
@@ -77,21 +83,24 @@ class UploadControllerIntegrationTest extends IntegrationTest {
     }
 
     @Test
-    @DisplayName("새 사진을 올리면 PROBE 로 크기가 채워지고 최소 PROBED 까지 진행한다")
+    @DisplayName("새 사진을 올리면 처리 전 INGESTED 로 즉시 응답하고, 워커가 돌면 PROBED 이상이 된다")
     void 새_파일_업로드() throws Exception {
         byte[] content = jpeg(640, 480);
 
         UploadOriginalResponse response = upload(content, "photo.jpg", "image/jpeg");
 
         assertThat(response.reused()).isFalse();
-        assertThat(response.status())
-                .isIn(MediaAssetStatus.PROBED, MediaAssetStatus.THUMBED);
+        assertThat(response.status()).isEqualTo(MediaAssetStatus.INGESTED);
+        assertThat(response.thumbKey()).isNull();
+
+        worker.drain(Lane.PHOTO);
 
         var stored = assets.findById(response.assetId()).orElseThrow();
         assertThat(stored.byteSize()).isEqualTo(content.length);
         assertThat(stored.mimeType()).isEqualTo("image/jpeg");
         assertThat(stored.width()).isEqualTo(640);
         assertThat(stored.height()).isEqualTo(480);
+        assertThat(stored.status()).isIn(MediaAssetStatus.PROBED, MediaAssetStatus.THUMBED);
     }
 
     @Test
@@ -106,18 +115,49 @@ class UploadControllerIntegrationTest extends IntegrationTest {
         assertThat(second.reused()).isTrue();
         assertThat(second.assetId()).isEqualTo(first.assetId());
         assertThat(assets.count()).isEqualTo(1);
+        // 작업도 하나만 — 중복은 처리도 없음. PROBE 1 + THUMB 1.
+        assertThat(worker.drain(Lane.PHOTO)).isEqualTo(2);
     }
 
     @Test
-    @DisplayName("손상된 이미지는 PROBE 에서 걸러져 FAILED 가 된다")
+    @DisplayName("손상된 이미지는 워커의 PROBE 에서 걸러져 FAILED 가 된다")
     void 손상된_이미지는_FAILED() throws Exception {
         byte[] garbage = new byte[4096];
         new Random(SEED).nextBytes(garbage);       // JPEG 헤더가 아닌 임의 바이트
 
         UploadOriginalResponse response = upload(garbage, "broken.jpg", "image/jpeg");
+        worker.drain(Lane.PHOTO);
 
-        assertThat(response.status()).isEqualTo(MediaAssetStatus.FAILED);
-        assertThat(response.thumbKey()).isNull();
+        assertThat(assets.findById(response.assetId()).orElseThrow().status()).isEqualTo(MediaAssetStatus.FAILED);
+    }
+
+    @Test
+    @DisplayName("GET /media/{id} 는 처리 진행에 따라 상태를 돌려준다")
+    void 상태_조회() throws Exception {
+        UUID assetId = upload(jpeg(200, 100), "s.jpg", "image/jpeg").assetId();
+
+        mockMvc.perform(get("/media/{id}", assetId).with(asUser(owner)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("INGESTED"))
+                .andExpect(jsonPath("$.processing").value(true));
+
+        worker.drain(Lane.PHOTO);
+
+        var after = json.readTree(mockMvc.perform(get("/media/{id}", assetId).with(asUser(owner)))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString());
+        assertThat(after.get("status").asString()).isIn("PROBED", "THUMBED");
+        assertThat(after.get("processing").asBoolean()).isFalse();   // 큐가 비었으니 폴링 멈춤
+    }
+
+    @Test
+    @DisplayName("남의 자산 상태는 존재를 흘리지 않고 404")
+    void 타인_자산_상태는_404() throws Exception {
+        UUID assetId = upload(jpeg(200, 100), "s.jpg", "image/jpeg").assetId();
+
+        User other = userAccounts.findOrCreate("GOOGLE", "other-sub", "other@example.com", "남");
+        mockMvc.perform(get("/media/{id}", assetId).with(asUser(archiveUser(other.id(), other.email()))))
+                .andExpect(status().isNotFound());
     }
 
     @Test

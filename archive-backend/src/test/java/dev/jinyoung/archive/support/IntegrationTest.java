@@ -27,8 +27,11 @@ import java.net.URI;
  *
  * <p>종료는 명시하지 않는다. Testcontainers 의 Ryuk 정리 컨테이너가 JVM 종료 시 회수한다.
  * 원격 데몬에서는 Ryuk 에도 접속이 되어야 하므로, 컨테이너가 남는다면 docs/infra.md §5 를 볼 것.
+ *
+ * <p>워커 루프는 끈다. 백그라운드 스레드가 큐를 비우면 테스트가 경합에 좌우됨 — 처리는 테스트가
+ * {@code JobWorker.drain()} 을 직접 호출해 결정론적으로 돌린다.
  */
-@SpringBootTest
+@SpringBootTest(properties = "archive.worker.enabled=false")
 public abstract class IntegrationTest {
 
     /**
